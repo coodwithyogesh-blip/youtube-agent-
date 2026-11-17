@@ -35,8 +35,8 @@ def generate_video_metadata(api_key, model, video_path, filename, caption=""):
         response = requests.post(
             endpoint, params={"key": api_key},
             headers={"X-Goog-Upload-Protocol": "multipart"},
-            data={"metadata": json.dumps({"file": {"display_name": filename[:100]}})},
-            files={"file": (filename, stream, "video/mp4")}, timeout=180)
+            files={"metadata": ("metadata", json.dumps({"file": {"display_name": filename[:100]}}), "application/json"),
+                   "file": (filename, stream, "video/mp4")}, timeout=180)
     response.raise_for_status()
     file_info = response.json().get("file", {})
     file_uri, file_name = file_info.get("uri"), file_info.get("name")
