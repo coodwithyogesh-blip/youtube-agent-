@@ -1,4 +1,4 @@
-import os, hmac, json, logging, secrets, urllib.parse
+import os, hmac, json, logging, secrets, urllib.parse, html
 from datetime import datetime, timezone
 from flask import Flask, request, jsonify, redirect
 import requests
@@ -12,8 +12,16 @@ app = Flask(__name__)
 SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl"]
 # Volatile memory only: no SQLite, no Supabase, no local database.
 PENDING = {}
+DONE = set()
 OAUTH_STATES = set()
 TELEGRAM_API = "https://api.telegram.org/bot"
+
+def telegram_html(value):
+    return html.escape(str(value or ""), quote=False)
+
+def comment_has_owner_reply(thread, channel_id):
+    replies = (thread.get("replies") or {}).get("comments", [])
+    return any(((reply.get("snippet") or {}).get("authorChannelId") or {}).get("value") == channel_id for reply in replies)
 
 def env(name, default=""):
     return os.getenv(name, default).strip()
@@ -93,13 +101,15 @@ def list_recent_comments():
         video_id = sn["resourceId"]["videoId"]
         title = sn.get("title", "YouTube video")
         try:
-            threads = service.commentThreads().list(part="snippet", videoId=video_id,
+            threads = service.commentThreads().list(part="snippet,replies", videoId=video_id,
                         maxResults=50, order="time", textFormat="plainText").execute()
         except HttpError as exc:
             if getattr(exc.resp, "status", None) in (403, 404):
                 continue
             raise
         for thread in threads.get("items", []):
+            if comment_has_owner_reply(thread, channel_id):
+                continue
             top = thread["snippet"]["topLevelComment"]
             c = top["snippet"]
             results.append({"id":top["id"],"video_id":video_id,"title":title,
@@ -112,7 +122,7 @@ def scan_and_send(chat_id):
     sent = 0
     for c in comments:
         cid = c["id"]
-        if cid in PENDING:
+        if cid in PENDING or cid in DONE:
             continue
         draft = ai_reply(c["text"], c["title"])
         PENDING[cid] = {"draft":draft,"video_id":c["video_id"],"created":datetime.now(timezone.utc).isoformat()}
@@ -142,6 +152,7 @@ def handle_callback(q):
             tg("editMessageText",{"chat_id":chat_id,"message_id":msg["message_id"],
                 "text":"⏭ <b>Skipped</b> — no reply was published.","parse_mode":"HTML"})
         PENDING.pop(cid,None)
+        DONE.add(cid)
         tg("answerCallbackQuery",{"callback_query_id":q["id"],"text":"Done"})
     except Exception as exc:
         log.exception("Comment action failed")
