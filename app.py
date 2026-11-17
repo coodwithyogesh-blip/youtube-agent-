@@ -56,7 +56,7 @@ def ai_reply(comment, video_title=""):
     if not key:
         raise RuntimeError("GEMINI_API_KEY is required for AI comment replies")
     model = env("GEMINI_MODEL", "gemini-3.8-flash")
-    fallback_model = env("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash-lite")
+    fallback_model = env("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash")
     prompt = ("Write one short, natural, respectful YouTube creator reply. Do not invent facts, "
         "promise anything, request personal data, or include links. For medical, legal, financial "
         "or private requests, politely say the creator cannot advise.\\n"
