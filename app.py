@@ -1,6 +1,7 @@
 import os, hmac, json, logging, secrets, urllib.parse, html, tempfile
 from datetime import datetime, timezone
 from flask import Flask, request, jsonify, redirect, Response
+from werkzeug.exceptions import HTTPException
 import requests
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -226,8 +227,9 @@ def upload_video_api():
         return jsonify(error="video file is required"), 400
     if not (video.mimetype or "").startswith("video/"):
         return jsonify(error="selected file must be a video"), 400
-    if thumbnail and thumbnail.filename and not (thumbnail.mimetype or "").startswith("image/"):
-        return jsonify(error="thumbnail must be an image"), 400
+    if thumbnail and thumbnail.filename and thumbnail.mimetype not in (
+        "image/jpeg", "image/png", "image/gif", "image/bmp"):
+        return jsonify(error="thumbnail must be JPEG, PNG, GIF, or BMP"), 400
     try:
         publish_at = parse_publish_at(request.form.get("publish_at", ""))
         body = build_video_metadata(
@@ -335,6 +337,8 @@ def set_webhook():
 
 @app.errorhandler(Exception)
 def errors(exc):
+    if isinstance(exc, HTTPException):
+        return exc
     log.exception("Unhandled request error")
     return jsonify(error="internal_error"),500
 
