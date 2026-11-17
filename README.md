@@ -1,52 +1,45 @@
-# YouTube Agent — cloud YouTube uploader and Telegram comment approvals
+# YouTube Agent — Telegram video publisher and automatic comment manager
 
-Cloud-first Flask app for Render. No SQLite, no Supabase, and no local Termux server.
+Cloud-first Flask app for Render. No SQLite, no Supabase, and no Termux/local server.
 
-## Current features
-- Telegram webhook with owner-only `/comments` command.
-- Gemini reply drafts; replies publish only after owner presses **Approve & reply**.
-- Avoids comments already answered by the connected YouTube channel.
-- Web dashboard at `/` with authenticated video upload.
-- Optional custom thumbnail upload.
-- Title, description, tags and visibility controls.
-- Native YouTube scheduled publishing. Choose an India-local date/time; YouTube keeps the scheduled video private until its publish time.
-- Health endpoint: `/healthz`.
+## Telegram video workflow
+1. Send the video to the connected Telegram bot.
+2. Send your own thumbnail as a Telegram photo.
+3. When both arrive, Gemini analyses the actual video and generates the title, description, SEO tags and hashtags.
+4. The app uploads the video as **Public** and sets the thumbnail you supplied. AI does not create or replace the thumbnail.
 
-## Video upload
-Open the Render service URL, enter `MANAGER_API_TOKEN`, select a video, optionally select a thumbnail, and submit. The upload API is `POST /api/videos/upload` and requires the `X-Manager-Token` header.
+No manual title, description, tags or hashtags are required. An optional Telegram caption is passed to Gemini as extra context. The Telegram Bot API download limit is 20 MB per file; send a smaller/compressed video if the bot cannot download it. Thumbnail must be 2 MB or smaller.
 
-The default request limit is 90 MB (`MAX_UPLOAD_MB`). Render's own request/body limits may be lower or vary by service, so this dashboard is intended for small/medium uploads. Large video files need a direct-to-cloud upload design rather than passing the whole file through the web request. A thumbnail must be 2 MB or smaller for YouTube.
+## Automatic YouTube comment replies
+- `AUTO_REPLY_MODE=automatic` enables unattended AI replies.
+- The service checks recent comments every 15 minutes by default (`COMMENT_POLL_SECONDS`).
+- It skips comments already answered by the connected channel and filters obvious spam, links and some sensitive requests.
+- Gemini writes a short reply and YouTube publishes it without an approval button.
+- `/comments` manually triggers a scan; `/status` reports configuration.
 
-Scheduling uses YouTube's native `status.publishAt`; no local scheduler or background worker is required. The scheduled publish time must be in the future. Times entered without an offset are interpreted as Asia/Kolkata.
+This is polling, not instant push notification. On Render Free, the service can sleep when idle; while asleep, comment scans do not run. Use an always-on service for reliable continuous monitoring. Processed-comment state is memory-only and resets on restart, but the code also checks existing channel replies before posting.
 
-## Important OAuth action
-This version now requests both YouTube scopes:
-- `youtube.force-ssl` (comment management)
-- `youtube.upload` (video upload and thumbnail)
+## Web dashboard
+Open the Render service URL, enter `MANAGER_API_TOKEN`, select a video and your thumbnail, and submit. The dashboard also generates metadata from the video using Gemini. API: `POST /api/videos/upload-ai`.
 
-After deploying this version, reconnect Google OAuth at `/oauth/start` and replace `YOUTUBE_REFRESH_TOKEN` in Render with the newly issued token. An older token may not have upload permission. Add the exact redirect URI `https://YOUR-RENDER-HOST/oauth/callback` to your Google OAuth client.
+The default request limit is 90 MB (`MAX_UPLOAD_MB`). Render's own request/body limits may be lower or vary by service. Large uploads need a direct-to-cloud upload design rather than passing the whole file through the web request.
 
-## Render deployment
-- Build command: `pip install -r requirements.txt`
-- Start command: `gunicorn app:app --workers 1 --threads 8 --timeout 120`
-- Health check path: `/healthz`
-- Set `RENDER_EXTERNAL_URL` to the exact deployed HTTPS URL.
-- Set secrets only in Render Environment, never in GitHub.
+## Required environment
+Set these in Render Environment:
+- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_OWNER_ID`
+- Optional `TELEGRAM_GROUP_ID` to restrict the bot to one group
+- `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_REFRESH_TOKEN`
+- `GEMINI_API_KEY` (required for AI video metadata and AI comment replies)
+- `MANAGER_API_TOKEN`, `RENDER_EXTERNAL_URL`
+- `AUTO_REPLY_MODE=automatic`, `COMMENT_POLL_SECONDS=900`
 
-## Environment
-Copy values from `.env.example`. Required settings include Telegram bot token/webhook secret/owner ID, Google OAuth client ID and secret, YouTube refresh token, and `MANAGER_API_TOKEN`. `GEMINI_API_KEY` is optional for comment drafting.
+## OAuth
+This app requests `youtube.force-ssl` and `youtube.upload`. After deploying, authorize again at `/oauth/start` and replace `YOUTUBE_REFRESH_TOKEN` in Render with the new token. Add exact redirect URI `https://YOUR-RENDER-HOST/oauth/callback` in Google Cloud OAuth settings. Never share the refresh token.
 
-## Telegram commands
-- `/start` or `/help`
-- `/status`
-- `/comments` — create approval cards for recent comments.
+## Render
+- Build: `pip install -r requirements.txt`
+- Start: `gunicorn app:app --workers 1 --threads 8 --timeout 240`
+- Health check: `/healthz`
 
-## Storage and Render Free limitation
-No SQLite or Supabase is used. Telegram pending approvals and OAuth state are held in memory and are lost when the service restarts or sleeps. Video uploads go directly to YouTube; uploaded video and thumbnail temp files are removed from the service after the request. This build does not retain an upload queue or local media library.
-
-## Safety
-- Replies are approval-gated; no unattended auto-reply.
-- Dashboard upload is protected by `MANAGER_API_TOKEN`.
-- Scheduled publishing is handled by YouTube after the upload succeeds.
-- Test with a private video before making content public.
-- Never share the YouTube refresh token or manager token.
+## Storage and limitations
+No SQLite or Supabase. Media files are temporary and removed after upload. Telegram media, duplicate tracking and OAuth state are held in process memory and reset on restart. Test with a private/test channel first; this configuration publishes Telegram submissions publicly. Never share tokens.
