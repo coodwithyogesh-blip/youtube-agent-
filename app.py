@@ -8,7 +8,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 from upload_utils import parse_publish_at, build_video_metadata
-from ai_utils import generate_video_metadata, should_auto_reply
+from ai_utils import generate_video_metadata, should_auto_reply, generate_content_with_fallback
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 log = logging.getLogger("youtube-agent")
@@ -55,16 +55,18 @@ def ai_reply(comment, video_title=""):
     key = env("GEMINI_API_KEY")
     if not key:
         raise RuntimeError("GEMINI_API_KEY is required for AI comment replies")
-    model = env("GEMINI_MODEL", "gemini-2.5-flash")
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
+    model = env("GEMINI_MODEL", "gemini-3.8-flash")
+    fallback_model = env("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash-lite")
     prompt = ("Write one short, natural, respectful YouTube creator reply. Do not invent facts, "
         "promise anything, request personal data, or include links. For medical, legal, financial "
-        "or private requests, politely say the creator cannot advise.\n"
-        f"Video: {video_title}\nComment: {comment}")
-    r = requests.post(url, json={"contents":[{"parts":[{"text":prompt}]}],
-        "generationConfig":{"temperature":0.4,"maxOutputTokens":160}}, timeout=35)
-    r.raise_for_status()
-    return r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()[:900]
+        "or private requests, politely say the creator cannot advise.\\n"
+        f"Video: {video_title}\\nComment: {comment}")
+    data = generate_content_with_fallback(
+        key, model,
+        {"contents":[{"parts":[{"text":prompt}]}],
+         "generationConfig":{"temperature":0.4,"maxOutputTokens":160}},
+        timeout=35, fallback_model=fallback_model)
+    return data["candidates"][0]["content"]["parts"][0]["text"].strip()[:900]
 
 def authorized(user_id, chat_id):
     owner, group = env("TELEGRAM_OWNER_ID"), env("TELEGRAM_GROUP_ID")
@@ -98,7 +100,7 @@ def upload_telegram_pair(chat_id):
     try:
         send_tg(chat_id, "🎬 Video aur thumbnail mil gaye. AI video analyse karke title, description, tags aur hashtags bana raha hai…")
         metadata = generate_video_metadata(env("GEMINI_API_KEY"),
-            env("GEMINI_MODEL","gemini-2.5-flash"), item["video"], item.get("filename","video.mp4"),
+            env("GEMINI_MODEL","gemini-3.8-flash"), item["video"], item.get("filename","video.mp4"),
             item.get("caption",""))
         body = build_video_metadata(metadata["title"], metadata["description"],
                                     json.dumps(metadata["tags"]), "public", None)
