@@ -74,9 +74,9 @@ def authorized(user_id, chat_id):
 
 def send_comment_card(chat_id, comment_id, video_title, author, comment, draft):
     text = (f"💬 <b>YouTube comment for approval</b>\n"
-            f"<b>Video:</b> {video_title[:150]}\n<b>From:</b> {author[:100]}\n"
-            f"<b>Comment:</b> {comment[:700]}\n\n<b>AI draft:</b> {draft[:900]}\n"
-            f"<code>{comment_id}</code>\n\nReply will publish only after your approval.")
+            f"<b>Video:</b> {telegram_html(video_title[:150])}\n<b>From:</b> {telegram_html(author[:100])}\n"
+            f"<b>Comment:</b> {telegram_html(comment[:700])}\n\n<b>AI draft:</b> {telegram_html(draft[:900])}\n"
+            f"<code>{telegram_html(comment_id)}</code>\n\nReply will publish only after your approval.")
     keyboard = {"inline_keyboard":[[
         {"text":"✅ Approve & reply","callback_data":"approve:"+comment_id},
         {"text":"⏭ Skip","callback_data":"skip:"+comment_id}
