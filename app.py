@@ -1,15 +1,18 @@
-import os, hmac, json, logging, secrets, urllib.parse, html
+import os, hmac, json, logging, secrets, urllib.parse, html, tempfile
 from datetime import datetime, timezone
-from flask import Flask, request, jsonify, redirect
+from flask import Flask, request, jsonify, redirect, Response
 import requests
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from googleapiclient.http import MediaFileUpload
+from upload_utils import parse_publish_at, build_video_metadata
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 log = logging.getLogger("youtube-agent")
 app = Flask(__name__)
-SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl"]
+app.config["MAX_CONTENT_LENGTH"] = int(os.getenv("MAX_UPLOAD_MB", "90")) * 1024 * 1024
+SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl", "https://www.googleapis.com/auth/youtube.upload"]
 # Volatile memory only: no SQLite, no Supabase, no local database.
 PENDING = {}
 DONE = set()
@@ -193,7 +196,82 @@ def process_update(update):
 
 @app.get("/")
 def home():
-    return "YouTube Agent is running. Use Telegram /comments to review AI reply drafts.", 200
+    return Response("""<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>YouTube Agent</title><style>body{font:16px system-ui;max-width:760px;margin:24px auto;padding:0 16px;background:#101827;color:#f4f7fb}
+    section{background:#1b2940;padding:18px;border-radius:14px;margin:14px 0}input,textarea,select,button{box-sizing:border-box;width:100%;padding:12px;margin:7px 0;border-radius:8px;border:1px solid #52627b;background:#0e1726;color:white}
+    button{background:#2874f0;border:0;font-weight:700}small{color:#b7c3d6}</style></head><body>
+    <h2>🎬 YouTube Agent</h2><p>Upload a video, optional custom thumbnail, or schedule a public release.</p>
+    <section><label>Manager API token<input id="token" type="password" autocomplete="off"></label>
+    <form id="upload"><label>Video file<input name="video" type="file" accept="video/*" required></label>
+    <label>Thumbnail (optional)<input name="thumbnail" type="file" accept="image/jpeg,image/png,image/gif,image/bmp"></label>
+    <label>Title<input name="title" maxlength="100" required></label>
+    <label>Description<textarea name="description" rows="5"></textarea></label>
+    <label>Tags (comma separated)<input name="tags" placeholder="gaming, free fire"></label>
+    <label>Visibility<select name="privacy"><option value="public">Public</option><option value="unlisted">Unlisted</option><option value="private">Private</option></select></label>
+    <label>Schedule publish time (India time; optional)<input name="publish_at" type="datetime-local"></label>
+    <button type="submit">Upload to YouTube</button></form><pre id="result">Ready</pre>
+    <small>Scheduled videos remain private until YouTube publishes them at the selected time. API token is sent only to this service.</small></section>
+    <script>document.getElementById('upload').addEventListener('submit',async e=>{e.preventDefault();const out=document.getElementById('result');out.textContent='Uploading… keep this page open.';
+    const data=new FormData(e.target);try{const r=await fetch('/api/videos/upload',{method:'POST',headers:{'X-Manager-Token':document.getElementById('token').value},body:data});
+    const j=await r.json();out.textContent=JSON.stringify(j,null,2);if(r.ok)e.target.reset();}catch(err){out.textContent=err.message;}});</script></body></html>""", mimetype="text/html")
+
+@app.post("/api/videos/upload")
+def upload_video_api():
+    if not env("MANAGER_API_TOKEN") or not hmac.compare_digest(
+        request.headers.get("X-Manager-Token", ""), env("MANAGER_API_TOKEN")):
+        return jsonify(error="unauthorized"), 401
+    video = request.files.get("video")
+    thumbnail = request.files.get("thumbnail")
+    if not video or not video.filename:
+        return jsonify(error="video file is required"), 400
+    if not (video.mimetype or "").startswith("video/"):
+        return jsonify(error="selected file must be a video"), 400
+    if thumbnail and thumbnail.filename and not (thumbnail.mimetype or "").startswith("image/"):
+        return jsonify(error="thumbnail must be an image"), 400
+    try:
+        publish_at = parse_publish_at(request.form.get("publish_at", ""))
+        body = build_video_metadata(
+            request.form.get("title"), request.form.get("description", ""),
+            request.form.get("tags", ""), request.form.get("privacy", "public"), publish_at)
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    temp_paths = []
+    try:
+        suffix = os.path.splitext(video.filename)[1][:12] or ".mp4"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            video.save(tmp); video_path = tmp.name
+        temp_paths.append(video_path)
+        media = MediaFileUpload(video_path, chunksize=8 * 1024 * 1024,
+                                resumable=True, mimetype=video.mimetype or "application/octet-stream")
+        result = yt().videos().insert(part="snippet,status", body=body, media_body=media).execute()
+        video_id = result["id"]
+        thumbnail_warning = None
+        if thumbnail and thumbnail.filename:
+            thumb_suffix = os.path.splitext(thumbnail.filename)[1][:12] or ".jpg"
+            with tempfile.NamedTemporaryFile(delete=False, suffix=thumb_suffix) as tmp:
+                thumbnail.save(tmp); thumb_path = tmp.name
+            temp_paths.append(thumb_path)
+            if os.path.getsize(thumb_path) > 2 * 1024 * 1024:
+                thumbnail_warning = "Video uploaded, but thumbnail exceeds YouTube's 2 MB limit."
+            else:
+                try:
+                    yt().thumbnails().set(videoId=video_id,
+                        media_body=MediaFileUpload(thumb_path, resumable=False,
+                                                  mimetype=thumbnail.mimetype or "image/jpeg")).execute()
+                except Exception as exc:
+                    log.exception("Thumbnail upload failed for %s", video_id)
+                    thumbnail_warning = "Video uploaded, but thumbnail failed: " + str(exc)[:250]
+        return jsonify(ok=True, video_id=video_id,
+            video_url="https://youtu.be/" + video_id,
+            scheduled_publish_at=publish_at,
+            thumbnail_warning=thumbnail_warning), 201
+    except Exception as exc:
+        log.exception("YouTube video upload failed")
+        return jsonify(error=str(exc)[:500]), 500
+    finally:
+        for path in temp_paths:
+            try: os.remove(path)
+            except OSError: pass
 
 @app.get("/healthz")
 def health():
