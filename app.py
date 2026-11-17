@@ -54,7 +54,7 @@ def yt():
 def ai_reply(comment, video_title=""):
     key = env("GEMINI_API_KEY")
     if not key:
-        return "Thanks for watching! We appreciate your comment."
+        raise RuntimeError("GEMINI_API_KEY is required for AI comment replies")
     model = env("GEMINI_MODEL", "gemini-2.5-flash")
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
     prompt = ("Write one short, natural, respectful YouTube creator reply. Do not invent facts, "
