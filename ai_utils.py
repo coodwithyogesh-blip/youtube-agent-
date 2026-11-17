@@ -1,6 +1,82 @@
 import json
+import os
 import re
+import time
 import requests
+
+RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
+
+
+def generate_content_with_fallback(api_key, model, payload, timeout=60,
+                                  fallback_model=None, max_attempts=3):
+    """Call Gemini GenerateContent with bounded retries and one model fallback.
+
+    Transient HTTP/network failures use exponential backoff. A fallback model is
+    tried only after the primary model is unavailable or not found. Error text
+    intentionally omits request URLs and API keys.
+    """
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY is required")
+    models = []
+    for candidate in (model, fallback_model):
+        name = str(candidate or "").strip()
+        if name and name not in models:
+            models.append(name)
+    if not models:
+        raise RuntimeError("GEMINI_MODEL is not configured")
+
+    last_status = None
+    last_network_error = None
+    for model_index, model_name in enumerate(models):
+        for attempt in range(max(1, int(max_attempts))):
+            url = ("https://generativelanguage.googleapis.com/v1beta/models/"
+                   f"{model_name}:generateContent")
+            try:
+                response = requests.post(url, params={"key": api_key},
+                                         json=payload, timeout=timeout)
+                status = response.status_code
+                if status >= 400:
+                    last_status = status
+                    if status not in RETRYABLE_STATUS_CODES and status != 404:
+                        raise RuntimeError(
+                            f"Gemini API request failed with HTTP {status}. "
+                            "Check API key permissions, quota, and request settings."
+                        )
+                    if attempt + 1 < max_attempts and status in RETRYABLE_STATUS_CODES:
+                        time.sleep(min(2 ** attempt, 8))
+                        continue
+                    break
+                return response.json()
+            except requests.RequestException as exc:
+                response = getattr(exc, "response", None)
+                status = getattr(response, "status_code", None)
+                if status is not None:
+                    last_status = status
+                    if status not in RETRYABLE_STATUS_CODES and status != 404:
+                        raise RuntimeError(
+                            f"Gemini API request failed with HTTP {status}. "
+                            "Check API key permissions, quota, and request settings."
+                        ) from None
+                else:
+                    last_network_error = type(exc).__name__
+                if attempt + 1 < max_attempts and (status is None or status in RETRYABLE_STATUS_CODES):
+                    time.sleep(min(2 ** attempt, 8))
+                    continue
+                break
+        # Try the fallback only after transient failure or model-not-found.
+        if model_index + 1 < len(models):
+            continue
+
+    if last_status is not None:
+        raise RuntimeError(
+            f"Gemini primary and fallback models are unavailable (HTTP {last_status}). "
+            "Wait a little and retry; check Google AI Studio status and model access."
+        )
+    raise RuntimeError(
+        "Gemini request could not connect after retries"
+        + (f" ({last_network_error})" if last_network_error else "")
+        + ". Check Render network/logs and try again."
+    )
 
 def clean_generated_metadata(raw):
     if not isinstance(raw, dict):
@@ -53,7 +129,6 @@ def generate_video_metadata(api_key, model, video_path, filename, caption=""):
                 break
             if state.get("state") == "FAILED":
                 raise RuntimeError("Gemini could not process this video")
-            import time
             time.sleep(2)
         else:
             raise RuntimeError("Gemini video processing timed out")
@@ -67,16 +142,14 @@ def generate_video_metadata(api_key, model, video_path, filename, caption=""):
             "when clear; otherwise use English. Never claim anything not shown. "
             f"Uploader note/Telegram caption: {caption[:1000]}"
         )
-        generated = requests.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-            params={"key": api_key},
-            json={"contents":[{"parts":[{"text":prompt},
+        generated = generate_content_with_fallback(
+            api_key, model,
+            {"contents":[{"parts":[{"text":prompt},
                     {"file_data":{"mime_type":file_info.get("mimeType","video/mp4"),
                                   "file_uri":file_uri}}]}],
-                  "generationConfig":{"temperature":0.35,"responseMimeType":"application/json"}},
-            timeout=120)
-        generated.raise_for_status()
-        text = generated.json()["candidates"][0]["content"]["parts"][0]["text"]
+             "generationConfig":{"temperature":0.35,"responseMimeType":"application/json"}},
+            timeout=120, fallback_model=os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash"))
+        text = generated["candidates"][0]["content"]["parts"][0]["text"]
         return clean_generated_metadata(json.loads(text))
     finally:
         try:

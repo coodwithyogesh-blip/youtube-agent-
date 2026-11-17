@@ -30,6 +30,7 @@ Set these in Render Environment:
 - Optional `TELEGRAM_GROUP_ID` to restrict the bot to one group
 - `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_REFRESH_TOKEN`
 - `GEMINI_API_KEY` (required for AI video metadata and AI comment replies)
+- `GEMINI_MODEL=gemini-3.8-flash` and `GEMINI_FALLBACK_MODEL=gemini-3.5-flash` (optional; bounded retries with exponential backoff are built in for transient 429/5xx/network failures)
 - `MANAGER_API_TOKEN`, `RENDER_EXTERNAL_URL`
 - `AUTO_REPLY_MODE=automatic`, `COMMENT_POLL_SECONDS=900`
 
