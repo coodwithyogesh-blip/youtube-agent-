@@ -323,6 +323,109 @@ def start_auto_worker():
 def ensure_worker():
     start_auto_worker()
 
+def build_channel_seo_report(user_id, channel_id):
+    credentials = youtube_credentials_for_token(
+        decrypt_refresh_token(get_youtube_connection(user_id, channel_id)["refresh_token_enc"])
+    )
+    service = build("youtube", "v3", credentials=credentials, cache_discovery=False)
+    channel_items = service.channels().list(
+        part="snippet,statistics,contentDetails", id=channel_id
+    ).execute().get("items", [])
+    if not channel_items:
+        raise RuntimeError("YouTube channel not found")
+    channel = channel_items[0]
+    uploads = channel["contentDetails"]["relatedPlaylists"]["uploads"]
+    playlist = service.playlistItems().list(
+        part="snippet", playlistId=uploads, maxResults=50
+    ).execute()
+    video_ids = [x["snippet"]["resourceId"]["videoId"] for x in playlist.get("items", [])
+                 if x.get("snippet", {}).get("resourceId", {}).get("videoId")]
+    videos = []
+    if video_ids:
+        data = service.videos().list(
+            part="snippet,statistics", id=",".join(video_ids[:50]), maxResults=50
+        ).execute()
+        for item in data.get("items", []):
+            sn = item.get("snippet", {})
+            seo = score_video_seo({
+                "title": sn.get("title"), "description": sn.get("description"),
+                "tags": sn.get("tags", []), "thumbnail": bool(sn.get("thumbnails")),
+            })
+            videos.append({
+                "title": sn.get("title", "Untitled"),
+                "views": int(item.get("statistics", {}).get("viewCount", 0)),
+                "score": seo["score"], "suggestions": seo["suggestions"],
+            })
+
+    analytics_rows = []
+    analytics_error = ""
+    try:
+        analytics = build("youtubeAnalytics", "v2", credentials=credentials, cache_discovery=False)
+        end_date = datetime.now(timezone.utc).date()
+        start_date = end_date - timedelta(days=27)
+        result = analytics.reports().query(
+            ids="channel==MINE", startDate=start_date.isoformat(),
+            endDate=end_date.isoformat(),
+            metrics="views,estimatedMinutesWatched,subscribersGained,subscribersLost",
+            dimensions="day", sort="day"
+        ).execute()
+        analytics_rows = result.get("rows", [])
+    except Exception as exc:
+        analytics_error = "Analytics trend unavailable. Google account ko dobara connect karke YouTube Analytics permission allow karo."
+        log.info("YouTube Analytics API unavailable: %s", type(exc).__name__)
+
+    stats = channel.get("statistics", {})
+    return {
+        "channel": channel.get("snippet", {}).get("title", "YouTube channel"),
+        "subscribers": int(stats.get("subscriberCount", 0)),
+        "views": int(stats.get("viewCount", 0)),
+        "video_count": int(stats.get("videoCount", 0)),
+        "videos": sorted(videos, key=lambda x: x["score"])[:10],
+        "analytics_rows": analytics_rows,
+        "analytics_error": analytics_error,
+    }
+
+
+def format_channel_seo_report(report):
+    lines = [
+        "📊 CHANNEL SEO & ANALYTICS",
+        report["channel"], "",
+        "👥 Subscribers: " + format(report["subscribers"], ","),
+        "👁 Lifetime views: " + format(report["views"], ","),
+        "🎬 Total videos: " + format(report["video_count"], ","),
+        "",
+    ]
+    rows = report["analytics_rows"]
+    if rows:
+        max_views = max([int(row[1]) for row in rows] or [1]) or 1
+        lines.append("📈 Daily views — last 28 days")
+        for row in rows[-14:]:
+            value = int(row[1])
+            bars = "▰" * max(1, round(12 * value / max_views))
+            lines.append(f"{str(row[0])[-5:]} {bars} {value:,}")
+        total_minutes = sum(int(row[2]) for row in rows)
+        gained = sum(int(row[3]) for row in rows)
+        lost = sum(int(row[4]) for row in rows)
+        lines.extend([
+            "", f"⏱ Watch time: {total_minutes:,} minutes",
+            f"➕ Subscribers gained: {gained:,}",
+            f"➖ Subscribers lost: {lost:,}",
+        ])
+    elif report["analytics_error"]:
+        lines.extend(["📈 Watch-time/growth graph:", report["analytics_error"]])
+    lines.extend(["", "🔎 Lowest SEO scores — recent videos"])
+    for video in report["videos"]:
+        bars = "█" * (video["score"] // 10) + "░" * (10 - video["score"] // 10)
+        lines.append(f"{bars} {video['score']}/100 — {video['title'][:42]}")
+        for suggestion in video["suggestions"][:2]:
+            lines.append("  • " + suggestion)
+    lines.extend([
+        "",
+        "SEO score title/description/tags/thumbnail completeness par based hai; ranking guarantee nahi.",
+    ])
+    return "\n".join(lines)[:3900]
+
+
 def main_menu_keyboard():
     return {"inline_keyboard": [
         [{"text": "▶️ YouTube", "callback_data": "platform_youtube"},
@@ -332,6 +435,7 @@ def main_menu_keyboard():
          {"text": "📘 Facebook", "callback_data": "platform_facebook"}],
         [{"text": "👻 Snapchat", "callback_data": "platform_snapchat"},
          {"text": "💬 Comment Replies", "callback_data": "comments"}],
+        [{"text": "📊 Channel SEO & Analytics", "callback_data": "seo_analytics"}],
         [{"text": "⚙️ Settings", "callback_data": "settings"}],
     ]}
 
@@ -370,9 +474,10 @@ def callback_response(data):
             "📝 Posting manually Facebook app par karni hogi."),
         "platform_snapchat": ("👻 Snapchat\n\nSnapchat account connection abhi available "
             "nahi hai. Platform access/approval requirements check karne honge."),
-        "comments": ("💬 Comment Replies\n\nAI/Manual reply selection abhi per-user "
-            "workflow mein active nahi hai. Current automatic YouTube replies legacy owner "
-            "configuration use karte hain."),
+        "comments": ("💬 YouTube Auto Comment Replies\n\nConnected channels ke comments "
+            "har 2 minute mein check honge. AI relevant replies post karega; spam/links "
+            "skip honge. Comment/reply text Google Sheets mein save nahi hota."),
+        "seo_analytics": "📊 Channel SEO & Analytics — connected channel select karo.",
         "settings": ("⚙️ Settings\n\nTumhari registration aur default settings Google "
             "Sheets mein save hoti hain. Per-user reply mode aur polling controls abhi "
             "implement nahi hue hain."),
@@ -407,6 +512,33 @@ def process_update(update):
                 except Exception:
                     log.exception("Could not load connected accounts")
                     send_tg(chat_id, "❌ Accounts load nahi ho paaye. Google Sheet connection check karo.")
+            elif data == "seo_analytics":
+                try:
+                    accounts = list_youtube_connections(query.get("from", {}).get("id"))
+                    rows = [[{"text": "📊 " + (a.get("account_name") or "YouTube channel")[:32],
+                              "callback_data": "seo:" + a["channel_id"]}]
+                            for a in accounts if a.get("channel_id")]
+                    rows.append([{"text": "⬅️ Main Menu", "callback_data": "menu"}])
+                    if not rows or len(rows) == 1:
+                        send_tg(chat_id, "Pehle YouTube account connect karo.")
+                    else:
+                        tg("sendMessage", {"chat_id": chat_id,
+                            "text": "SEO report ke liye apna channel select karo:",
+                            "reply_markup": {"inline_keyboard": rows}})
+                except Exception:
+                    log.exception("SEO channel list failed")
+                    send_tg(chat_id, "❌ Channel list load nahi hui.")
+            elif data.startswith("seo:"):
+                channel_id = data.split(":", 1)[1]
+                try:
+                    accounts = list_youtube_connections(query.get("from", {}).get("id"))
+                    if not any(a.get("channel_id") == channel_id for a in accounts):
+                        raise RuntimeError("Ye channel tumhare account se connected nahi hai.")
+                    report = build_channel_seo_report(query.get("from", {}).get("id"), channel_id)
+                    send_tg(chat_id, format_channel_seo_report(report))
+                except Exception as exc:
+                    log.exception("SEO report failed")
+                    send_tg(chat_id, "❌ SEO report nahi ban payi: " + str(exc)[:300])
             elif data == "upload_video":
                 try:
                     accounts = list_youtube_connections(query.get("from", {}).get("id"))
