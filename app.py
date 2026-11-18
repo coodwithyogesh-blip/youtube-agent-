@@ -383,7 +383,7 @@ def auto_reply_scan_for_service(service, channel_id, telegram_user_id=None):
                 try:
                     send_tg(notification_chat_id,
                         "✅ Replied to your comment successfully!\\n"
-                        "Channel: " + str(channel_id) + "\\n"
+                        "Channel: " + str(channel_id) + "\n"
                         "Comment: " + str(comment["text"])[:180])
                 except Exception:
                     log.exception("Telegram success notification failed for comment %s", cid)
