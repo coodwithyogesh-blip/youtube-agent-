@@ -58,7 +58,7 @@ Setup:
 5. Add the two environment variables in Render and redeploy.
 6. Open the Telegram bot privately and send `/start`. The user should then appear in the Users tab.
 
-Important: this is the first storage/onboarding layer only. The existing YouTube upload and OAuth code still uses the legacy single-owner YouTube token. Public multi-user uploads and per-user social-account connections are not enabled yet; do not treat registration as account authorization. Passwords and raw browser cookies must never be stored in Sheets.
+Important: Telegram users connect YouTube through the signed OAuth flow. Multiple channels can be stored for the same Telegram user; each channel refresh token is encrypted with TOKEN_ENCRYPTION_KEY. In Telegram, use Upload Video, select one of your own connected channels, then send the video and thumbnail. The upload service resolves the token by both Telegram user ID and selected channel ID, so one user cannot select another user's channel. The older web dashboard and automatic comment worker still use the legacy owner YOUTUBE_REFRESH_TOKEN; per-user comment moderation is a separate pending workflow. Instagram, Facebook and Snapchat are not yet connected. Passwords and raw browser cookies must never be stored in Sheets.
 
 ## Storage and limitations
 No SQLite or Supabase. Media files are temporary and removed after upload. Telegram media, duplicate tracking and OAuth state are held in process memory and reset on restart. Test with a private/test channel first; this configuration publishes Telegram submissions publicly. Never share tokens.
