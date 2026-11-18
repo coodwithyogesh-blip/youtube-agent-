@@ -16,6 +16,14 @@ class CommentReplyRetryTests(unittest.TestCase):
             "text": "Nice video!",
         }
         self.service = Mock()
+        self.claim_patch = patch("app.claim_comment_reply", return_value=True)
+        self.mark_patch = patch("app.mark_comment_reply")
+        self.claim_patch.start()
+        self.mark_patch.start()
+
+    def tearDown(self):
+        self.claim_patch.stop()
+        self.mark_patch.stop()
 
     @patch("app.send_tg")
     @patch("app.ai_reply", return_value="Thank you!")
