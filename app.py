@@ -703,7 +703,7 @@ def callback_response(data):
         "platform_youtube": ("▶️ YouTube\n\nAbhi existing YouTube upload feature owner ke "
             "configured channel par kaam karta hai. Har user ka alag YouTube OAuth connection "
             "abhi ready nahi hai."),
-        "platform_instagram": "📸 Instagram selected. Ab video bhejo; AI visuals/audio analyse karke caption banayega. Posting manually hogi.",
+        "platform_instagram": "📸 Instagram selected. Ab video bhejo; AI visuals/audio analyse karke caption banayega. Posting manually hogi; Password/cookies nahi maange jaate.",
         "platform_facebook": "📘 Facebook selected. Ab video bhejo; AI visuals/audio analyse karke post banayega. Posting manually hogi.",
         "platform_snapchat": "👻 Snapchat selected. Ab video bhejo; AI visuals/audio analyse karke Spotlight caption banayega. Posting manually hogi.",
         "comments": ("💬 YouTube Auto Comment Replies\n\nConnected channels ke comments "
