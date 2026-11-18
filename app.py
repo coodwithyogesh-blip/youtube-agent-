@@ -9,7 +9,7 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 from upload_utils import parse_publish_at, build_video_metadata
 from ai_utils import generate_video_metadata, should_auto_reply, generate_content_with_fallback
-from sheets_store import register_user, save_youtube_connection
+from sheets_store import register_user, save_youtube_connection, list_youtube_connections
 from cryptography.fernet import Fernet
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
@@ -248,6 +248,7 @@ def ensure_worker():
 def main_menu_keyboard():
     return {"inline_keyboard": [
         [{"text": "▶️ YouTube", "callback_data": "platform_youtube"},
+         {"text": "👤 My Accounts", "callback_data": "my_accounts"}],
          {"text": "📸 Instagram", "callback_data": "platform_instagram"}],
         [{"text": "📘 Facebook", "callback_data": "platform_facebook"},
          {"text": "👻 Snapchat", "callback_data": "platform_snapchat"}],
@@ -259,8 +260,18 @@ def main_menu_keyboard():
 def main_menu_text(first_name=""):
     greeting = f" {first_name}" if first_name else ""
     return ("👋 Welcome" + greeting + " to Social Media Agent!\n\n"
-            "Apna platform choose karo. Account connections aur per-user automation "
-            "abhi development mein hain; koi account bina authorization access nahi hoga.")
+            "Apna platform choose karo. YouTube account connect karke My Accounts mein dekh sakte ho.")
+
+
+def format_youtube_accounts(accounts):
+    if not accounts:
+        return "👤 My Accounts\\n\\nAbhi connected nahi hai. YouTube button se account connect karo."
+    lines = ["👤 My Accounts", "", "✅ Connected YouTube account(s):"]
+    for index, account in enumerate(accounts, 1):
+        name = telegram_html(account.get("account_name") or "YouTube channel")
+        channel_id = telegram_html(account.get("channel_id") or "ID unavailable")
+        lines.append(f"{index}. {name}\\n   Channel ID: {channel_id}")
+    return "\\n".join(lines)
 
 
 def callback_response(data):
@@ -298,6 +309,18 @@ def process_update(update):
                     "message_id": message.get("message_id"),
                     "text": main_menu_text((query.get("from") or {}).get("first_name", "")),
                     "reply_markup": main_menu_keyboard()})
+
+            elif data == "my_accounts":
+                try:
+                    accounts = list_youtube_connections(query.get("from", {}).get("id"))
+                    tg("sendMessage", {"chat_id": chat_id,
+                        "text": format_youtube_accounts(accounts),
+                        "reply_markup": {"inline_keyboard": [
+                            [{"text": "🔗 Connect YouTube", "callback_data": "platform_youtube"}],
+                            [{"text": "⬅️ Main Menu", "callback_data": "menu"}]]}})
+                except Exception:
+                    log.exception("Could not load connected accounts")
+                    send_tg(chat_id, "❌ Accounts load nahi ho paaye. Google Sheet connection check karo.")
             elif data == "platform_youtube":
                 try:
                     state = make_youtube_oauth_state(query.get("from", {}).get("id"))
@@ -493,11 +516,19 @@ def youtube_multi_oauth_callback():
     except Exception:
         log.exception("Saving per-user YouTube connection failed")
         return "YouTube channel verify/save nahi ho paya. Render logs aur Google Sheet permissions check karo.", 500
+
+    try:
+        tg("sendMessage", {"chat_id": data["user_id"],
+            "text": "✅ YouTube successfully connect ho gaya!\\n\\nChannel: " + telegram_html(channel_name)
+                + "\\n\\nAb My Accounts button se channel dekh sakte ho.",
+            "reply_markup": {"inline_keyboard": [
+                [{"text": "👤 My Accounts", "callback_data": "my_accounts"}],
+                [{"text": "⬅️ Main Menu", "callback_data": "menu"}]]}})
+    except Exception:
+        log.exception("Telegram connection confirmation could not be sent")
     return ("<h2>YouTube connected successfully!</h2><p>Channel: "
-        + html.escape(channel_name) + "</p><p>Telegram User ID: "
-        + html.escape(str(data["user_id"]))
-        + "</p><p>Refresh token Google Sheets mein encrypted form mein save hua hai. "
-        "Abhi upload/comment workflows ko per-user token par switch karna next step hai.</p>")
+        + html.escape(channel_name) + "</p><p>Telegram bot mein confirmation bhej diya gaya. "
+        "My Accounts button se channel dekh sakte hain.</p><p>Upload/comment workflows ko per-user token par switch karna abhi baaki hai.</p>")
 
 
 @app.get("/oauth/start")
