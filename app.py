@@ -177,7 +177,7 @@ def upload_telegram_pair(chat_id):
         send_tg(chat_id, "🎬 Video aur thumbnail mil gaye. AI video analyse karke title, description, tags aur hashtags bana raha hai…")
         metadata = generate_video_metadata(env("GEMINI_API_KEY"),
             env("GEMINI_MODEL","gemini-3.8-flash"), item["video"], item.get("filename","video.mp4"),
-            item.get("caption",""))
+            item.get("caption",""), thumbnail_path=item["thumbnail"])
         body = build_video_metadata(metadata["title"], metadata["description"],
                                     json.dumps(metadata["tags"]), "public", None)
         media = MediaFileUpload(item["video"], chunksize=8*1024*1024,
@@ -995,7 +995,7 @@ def upload_ai_api():
         with tempfile.NamedTemporaryFile(delete=False,suffix=os.path.splitext(thumbnail.filename)[1][:10] or ".jpg") as f:
             thumbnail.save(f); tp=f.name
         paths.append(tp)
-        metadata=generate_video_metadata(env("GEMINI_API_KEY"),env("GEMINI_MODEL","gemini-2.5-flash"),vp,video.filename)
+        metadata=generate_video_metadata(env("GEMINI_API_KEY"),env("GEMINI_MODEL","gemini-2.5-flash"),vp,video.filename,thumbnail_path=tp)
         body=build_video_metadata(metadata["title"],metadata["description"],json.dumps(metadata["tags"]),"public",None)
         vid=yt().videos().insert(part="snippet,status",body=body,media_body=MediaFileUpload(vp,chunksize=8*1024*1024,resumable=True,mimetype=video.mimetype)).execute()["id"]
         if os.path.getsize(tp)>2*1024*1024: return jsonify(error="Video uploaded but thumbnail exceeds YouTube 2 MB limit",video_id=vid),400
