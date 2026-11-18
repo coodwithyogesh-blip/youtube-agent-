@@ -10,7 +10,8 @@ from googleapiclient.http import MediaFileUpload
 from upload_utils import parse_publish_at, build_video_metadata
 from ai_utils import generate_video_metadata, should_auto_reply, generate_content_with_fallback
 from sheets_store import (register_user, save_youtube_connection, list_youtube_connections,
-                          get_youtube_connection)
+                          get_youtube_connection, save_social_draft, list_social_drafts)
+from social_drafts import build_social_draft
 from cryptography.fernet import Fernet
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
