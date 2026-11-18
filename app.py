@@ -336,21 +336,43 @@ def list_recent_comments(service, channel_id):
         if stop or not response.get("nextPageToken"):
             break
         page_token = response["nextPageToken"]
-    LAST_COMMENT_SCAN[channel_id] = now
+    # Do not advance the cursor here. The caller advances it only after every
+    # eligible comment has been handled; exceptions leave this batch retryable.
     return results
 
-def auto_reply_scan_for_service(service, channel_id):
+def auto_reply_scan_for_service(service, channel_id, telegram_user_id=None):
     count = 0
-    for comment in list_recent_comments(service, channel_id):
+    notification_chat_id = telegram_user_id or env("TELEGRAM_OWNER_ID")
+    comments = list_recent_comments(service, channel_id)
+    for comment in comments:
         cid = comment["id"]
         if cid in DONE or not should_auto_reply(comment["text"]):
             continue
-        reply = ai_reply(comment["text"], comment["title"])
+        try:
+            # generate_content_with_fallback retries 429/5xx with bounded
+            # exponential delays on both primary and fallback Gemini models.
+            reply = ai_reply(comment["text"], comment["title"])
+        except Exception:
+            log.exception("AI reply failed; comment %s remains pending for retry", cid)
+            raise
         service.comments().insert(part="snippet",
             body={"snippet": {"parentId": cid, "textOriginal": reply}}).execute()
+        # Mark complete immediately after YouTube confirms the reply. A
+        # Telegram notification failure must not cause a duplicate YouTube reply.
         DONE.add(cid)
         count += 1
         log.info("Auto-replied to YouTube comment %s on channel %s", cid, channel_id)
+        if notification_chat_id:
+            try:
+                send_tg(notification_chat_id,
+                    "✅ Replied to your comment successfully!\n"
+                    "Channel: " + str(channel_id) + "\n"
+                    "Comment: " + str(comment["text"])[:180])
+            except Exception:
+                log.exception("Telegram success notification failed for comment %s", cid)
+    # Advance only after the entire fetched batch has been processed. If Gemini
+    # or YouTube fails above, this line is skipped and the comments are fetched again.
+    LAST_COMMENT_SCAN[channel_id] = datetime.now(timezone.utc)
     return count
 
 
@@ -359,7 +381,8 @@ def auto_reply_scan():
     channels = service.channels().list(part="id", mine=True).execute().get("items", [])
     if not channels:
         raise RuntimeError("No YouTube channel found for legacy owner OAuth")
-    return auto_reply_scan_for_service(service, channels[0]["id"])
+    return auto_reply_scan_for_service(
+        service, channels[0]["id"], telegram_user_id=env("TELEGRAM_OWNER_ID"))
 
 
 def scan_all_connected_channels():
@@ -372,7 +395,9 @@ def scan_all_connected_channels():
             token = decrypt_refresh_token(account["refresh_token_enc"])
             service = build("youtube", "v3",
                 credentials=youtube_credentials_for_token(token), cache_discovery=False)
-            total += auto_reply_scan_for_service(service, account["channel_id"])
+            total += auto_reply_scan_for_service(
+                service, account["channel_id"],
+                telegram_user_id=account.get("telegram_user_id") or env("TELEGRAM_OWNER_ID"))
         except Exception:
             log.exception("Comment scan failed for connected channel %s", account.get("channel_id"))
     return total
