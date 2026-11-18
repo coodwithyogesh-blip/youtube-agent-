@@ -322,10 +322,12 @@ def callback_response(data):
         "platform_youtube": ("▶️ YouTube\n\nAbhi existing YouTube upload feature owner ke "
             "configured channel par kaam karta hai. Har user ka alag YouTube OAuth connection "
             "abhi ready nahi hai."),
-        "platform_instagram": ("📸 Instagram\n\nInstagram account connection abhi available "
-            "nahi hai. Secure official login/API integration next step mein banegi."),
-        "platform_facebook": ("📘 Facebook\n\nFacebook account connection abhi available "
-            "nahi hai. Secure official login/API integration next step mein banegi."),
+        "platform_instagram": ("📸 Instagram Content Studio\n\nDraft ke liye bhejo:\n"
+            "/draft instagram | apna topic\n\nDraft Google Sheets mein save hoga. "
+            "Posting manually Instagram app par karni hogi."),
+        "platform_facebook": ("📘 Facebook Content Studio\n\nDraft ke liye bhejo:\n"
+            "/draft facebook | apna topic\n\nDraft Google Sheets mein save hoga. "
+            "Posting manually Facebook app par karni hogi."),
         "platform_snapchat": ("👻 Snapchat\n\nSnapchat account connection abhi available "
             "nahi hai. Platform access/approval requirements check karne honge."),
         "comments": ("💬 Comment Replies\n\nAI/Manual reply selection abhi per-user "
@@ -444,10 +446,10 @@ def process_update(update):
                 lines = ["📝 Tumhare latest social drafts:"]
                 for index, draft in enumerate(drafts, 1):
                     lines.append(
-                        f"\\n{index}. {draft['platform'].title()} — {draft['topic']}\\n"
-                        f"{draft['caption']}\\n{draft['hashtags']}"
+                        f"\n{index}. {draft['platform'].title()} — {draft['topic']}\n"
+                        f"{draft['caption']}\n{draft['hashtags']}"
                     )
-                send_tg(chat_id, "\\n".join(lines)[:3900])
+                send_tg(chat_id, "\n".join(lines)[:3900])
         except Exception:
             log.exception("Could not list social drafts")
             send_tg(chat_id, "❌ Drafts load nahi hue. Google Sheets setup check karo.")
@@ -461,9 +463,9 @@ def process_update(update):
             draft = build_social_draft(platform, topic)
             save_social_draft(user_id, draft)
             send_tg(chat_id,
-                "✅ Social draft Google Sheets mein save ho gaya.\\n"
-                f"Platform: {draft['platform'].title()}\\n\\n"
-                f"{draft['caption']}\\n\\n{draft['hashtags']}\\n\\n"
+                "✅ Social draft Google Sheets mein save ho gaya.\n"
+                f"Platform: {draft['platform'].title()}\n\n"
+                f"{draft['caption']}\n\n{draft['hashtags']}\n\n"
                 "Copy karke app par manually post karo. /drafts se saved drafts dekh sakte ho.")
         except ValueError as exc:
             send_tg(chat_id, "❌ " + str(exc))
