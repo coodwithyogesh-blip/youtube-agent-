@@ -53,6 +53,25 @@ class CommentReplyRetryTests(unittest.TestCase):
         self.assertNotIn("COMMENT_RETRY_1", agent.DONE)
         self.assertNotIn(self.channel_id, agent.LAST_COMMENT_SCAN)
 
+    @patch("app.datetime")
+    def test_first_scan_includes_unanswered_comments_from_previous_days(self, mock_datetime):
+        from datetime import datetime, timezone, timedelta
+        now = datetime(2026, 11, 18, 12, 0, tzinfo=timezone.utc)
+        mock_datetime.now.return_value = now
+        old_comment = {
+            "id": "OLD_COMMENT_2D",
+            "snippet": {"topLevelComment": {"id": "OLD_COMMENT_2D", "snippet": {
+                "authorChannelId": {"value": "OTHER_CHANNEL"},
+                "publishedAt": (now - timedelta(days=2)).isoformat(),
+                "textOriginal": "Nice video!", "videoId": "VIDEO_OLD"
+            }}}
+        }
+        self.service.commentThreads().list().execute.return_value = {
+            "items": [old_comment]
+        }
+        comments = agent.list_recent_comments(self.service, self.channel_id)
+        self.assertEqual([item["id"] for item in comments], ["OLD_COMMENT_2D"])
+
 
 if __name__ == "__main__":
     unittest.main()
