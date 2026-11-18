@@ -17,7 +17,7 @@ class YouTubeInsightsTests(unittest.TestCase):
         video = {
             "title": "Free Fire ranked gameplay tips",
             "description": "Watch this gameplay and subscribe for more tips. This video covers ranked gameplay, useful tactics, and practical tips for players.",
-            "tags": ["Free Fire", "gameplay", "ranked"],
+            "tags": ["Free Fire", "gameplay", "ranked", "tips", "mobile gaming"],
             "thumbnail": True,
         }
         result = score_video_seo(video)
