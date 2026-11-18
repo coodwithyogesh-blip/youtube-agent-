@@ -265,13 +265,13 @@ def main_menu_text(first_name=""):
 
 def format_youtube_accounts(accounts):
     if not accounts:
-        return "👤 My Accounts\\n\\nAbhi connected nahi hai. YouTube button se account connect karo."
+        return "👤 My Accounts\n\nAbhi connected nahi hai. YouTube button se account connect karo."
     lines = ["👤 My Accounts", "", "✅ Connected YouTube account(s):"]
     for index, account in enumerate(accounts, 1):
         name = telegram_html(account.get("account_name") or "YouTube channel")
         channel_id = telegram_html(account.get("channel_id") or "ID unavailable")
-        lines.append(f"{index}. {name}\\n   Channel ID: {channel_id}")
-    return "\\n".join(lines)
+        lines.append(f"{index}. {name}\n   Channel ID: {channel_id}")
+    return "\n".join(lines)
 
 
 def callback_response(data):
@@ -519,8 +519,8 @@ def youtube_multi_oauth_callback():
 
     try:
         tg("sendMessage", {"chat_id": data["user_id"],
-            "text": "✅ YouTube successfully connect ho gaya!\\n\\nChannel: " + telegram_html(channel_name)
-                + "\\n\\nAb My Accounts button se channel dekh sakte ho.",
+            "text": "✅ YouTube successfully connect ho gaya!\n\nChannel: " + telegram_html(channel_name)
+                + "\n\nAb My Accounts button se channel dekh sakte ho.",
             "reply_markup": {"inline_keyboard": [
                 [{"text": "👤 My Accounts", "callback_data": "my_accounts"}],
                 [{"text": "⬅️ Main Menu", "callback_data": "menu"}]]}})
