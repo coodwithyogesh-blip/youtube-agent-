@@ -387,8 +387,7 @@ def process_update(update):
                     item["user_id"] = str(query.get("from", {}).get("id"))
                     item["selected_channel_id"] = channel_id
                     send_tg(chat_id, "✅ Selected: " + selected.get("account_name", "YouTube channel")
-                        + "
-Ab video bhejo, phir uska thumbnail photo bhejo.")
+                        + "\nAb video bhejo, phir uska thumbnail photo bhejo.")
                 except Exception as exc:
                     send_tg(chat_id, "❌ " + str(exc)[:250])
             elif data == "platform_youtube":
