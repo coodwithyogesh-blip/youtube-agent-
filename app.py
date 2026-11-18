@@ -8,11 +8,11 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 from upload_utils import parse_publish_at, build_video_metadata
-from ai_utils import generate_video_metadata, should_auto_reply, generate_content_with_fallback
+from ai_utils import (generate_video_metadata, should_auto_reply, generate_content_with_fallback, clean_generated_metadata)
 from sheets_store import (register_user, save_youtube_connection, list_youtube_connections,
                           get_youtube_connection, list_all_youtube_connections,
                           save_social_draft, list_social_drafts)
-from youtube_insights import comment_poll_interval, score_video_seo
+from youtube_insights import (comment_poll_interval, score_video_seo, weak_seo_videos, seo_score_distribution)
 from social_drafts import build_social_draft
 from cryptography.fernet import Fernet
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
@@ -26,6 +26,7 @@ DONE = set()
 LAST_COMMENT_SCAN = {}
 OAUTH_STATES = set()
 MEDIA = {}
+SEO_FIX_PENDING = {}
 AUTO_THREAD_STARTED = False
 TELEGRAM_API = "https://api.telegram.org/bot"
 
@@ -376,6 +377,7 @@ def build_channel_seo_report(user_id, channel_id):
                 "tags": sn.get("tags", []), "thumbnail": bool(sn.get("thumbnails")),
             })
             videos.append({
+                "id": item["id"],
                 "title": sn.get("title", "Untitled"),
                 "views": int(item.get("statistics", {}).get("viewCount", 0)),
                 "score": seo["score"], "suggestions": seo["suggestions"],
@@ -405,11 +407,115 @@ def build_channel_seo_report(user_id, channel_id):
         "views": int(stats.get("viewCount", 0)),
         "video_count": int(stats.get("videoCount", 0)),
         "videos": sorted(videos, key=lambda x: x["score"])[:10],
+        "weak_videos": sorted(weak_seo_videos(videos), key=lambda x: x["score"]),
+        "score_distribution": seo_score_distribution(videos),
         "videos_analyzed": len(videos),
         "average_seo": round(sum(v["score"] for v in videos) / len(videos)) if videos else 0,
         "analytics_rows": analytics_rows,
         "analytics_error": analytics_error,
     }
+
+
+def send_weak_seo_video_actions(chat_id, channel_id, videos):
+    if not videos:
+        return
+    for offset in range(0, len(videos), 20):
+        batch = videos[offset:offset + 20]
+        rows = []
+        lines = ["🛠 WEAK SEO VIDEOS — " + str(offset + 1) + " to " + str(offset + len(batch))]
+        for video in batch:
+            score = int(video["score"])
+            lines.append(f"\n{score}/100 — {video['title'][:65]}")
+            for suggestion in video.get("suggestions", [])[:2]:
+                lines.append("• " + suggestion)
+            rows.append([{"text": "🛠 Review & Fix: " + video["title"][:28],
+                          "callback_data": "seofix:" + channel_id + ":" + video["id"]}])
+        tg("sendMessage", {"chat_id": chat_id, "text": "\n".join(lines)[:3900],
+                           "reply_markup": {"inline_keyboard": rows}})
+
+
+def generate_seo_fix_metadata(snippet):
+    key = env("GEMINI_API_KEY")
+    if not key:
+        raise RuntimeError("GEMINI_API_KEY missing; SEO fix cannot be generated.")
+    old_title = str(snippet.get("title") or "")
+    old_description = str(snippet.get("description") or "")
+    old_tags = snippet.get("tags") or []
+    prompt = (
+        "Improve YouTube SEO metadata for this existing video. You do NOT see the video itself. "
+        "Use only facts explicitly supported by the current title, description and tags. "
+        "Do not invent gameplay, events, people, claims, links, dates or promises. If context is "
+        "unclear, keep the wording conservative and close to the original. Preserve the original "
+        "language and topic. Create a clear natural title <=100 characters, useful description "
+        "and 5-15 relevant tags; no keyword stuffing. Return ONLY JSON with title, description, tags.\n"
+        + json.dumps({"title": old_title, "description": old_description, "tags": old_tags},
+                     ensure_ascii=False)
+    )
+    result = generate_content_with_fallback(
+        key, env("GEMINI_MODEL", "gemini-3.8-flash"),
+        {"contents": [{"parts": [{"text": prompt}]}],
+         "generationConfig": {"temperature": 0.25, "responseMimeType": "application/json"}},
+        timeout=60, fallback_model=env("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash"))
+    raw = json.loads(result["candidates"][0]["content"]["parts"][0]["text"])
+    metadata = clean_generated_metadata(raw)
+    if not metadata["title"] or not metadata["description"]:
+        raise RuntimeError("AI ne valid title/description nahi banaya.")
+    return {"title": metadata["title"], "description": metadata["description"],
+            "tags": metadata["tags"][:30]}
+
+
+def get_seo_fix_video(service, video_id):
+    items = service.videos().list(part="snippet", id=video_id).execute().get("items", [])
+    if not items:
+        raise RuntimeError("Video nahi mila ya channel se remove ho chuka hai.")
+    return items[0]
+
+
+def seo_fix_preview(user_id, channel_id, video_id):
+    service = youtube_service_for_user(user_id, channel_id)
+    item = get_seo_fix_video(service, video_id)
+    snippet = item.get("snippet", {})
+    metadata = generate_seo_fix_metadata(snippet)
+    key = f"{user_id}:{channel_id}:{video_id}"
+    SEO_FIX_PENDING[key] = {
+        "metadata": metadata,
+        "original": {"title": snippet.get("title", ""),
+                     "description": snippet.get("description", ""),
+                     "tags": snippet.get("tags", [])},
+        "created_at": time.time(),
+    }
+    return metadata
+
+
+def apply_confirmed_seo_fix(user_id, channel_id, video_id):
+    key = f"{user_id}:{channel_id}:{video_id}"
+    pending = SEO_FIX_PENDING.get(key)
+    if not pending or time.time() - pending["created_at"] > 900:
+        SEO_FIX_PENDING.pop(key, None)
+        raise RuntimeError("Preview expire ho gaya. SEO report se dobara Review & Fix dabao.")
+    service = youtube_service_for_user(user_id, channel_id)
+    item = get_seo_fix_video(service, video_id)
+    current = item.get("snippet", {})
+    original = pending["original"]
+    if (current.get("title", "") != original["title"]
+            or current.get("description", "") != original["description"]
+            or current.get("tags", []) != original["tags"]):
+        SEO_FIX_PENDING.pop(key, None)
+        raise RuntimeError("Video metadata preview ke baad change hua. Naya preview banao.")
+    updated_snippet = {
+        "title": pending["metadata"]["title"],
+        "description": pending["metadata"]["description"],
+        "tags": pending["metadata"]["tags"],
+        "categoryId": current.get("categoryId", "22"),
+    }
+    for field in ("defaultLanguage", "defaultAudioLanguage"):
+        if current.get(field):
+            updated_snippet[field] = current[field]
+    service.videos().update(
+        part="snippet", body={"id": video_id, "snippet": updated_snippet}
+    ).execute()
+    SEO_FIX_PENDING.pop(key, None)
+    return pending["metadata"]
 
 
 def format_channel_seo_report(report):
@@ -421,8 +527,17 @@ def format_channel_seo_report(report):
         "🎬 Total videos: " + format(report["video_count"], ","),
         "🔎 Videos SEO checked: " + format(report["videos_analyzed"], ","),
         "⭐ Average SEO score: " + str(report["average_seo"]) + "/100",
+        "📉 Weak SEO videos (below 80): " + str(len(report["weak_videos"])),
         "",
+        "📊 SEO SCORE DISTRIBUTION",
     ]
+    bands = report["score_distribution"]
+    max_band = max(bands.values() or [1]) or 1
+    for label, key in (("Poor 0–39", "poor"), ("Fair 40–69", "fair"),
+                       ("Good 70–89", "good"), ("Excellent 90–100", "excellent")):
+        count = bands[key]
+        lines.append(f"{label}: {'█' * round(12 * count / max_band)} {count}")
+    lines.append("")
     rows = report["analytics_rows"]
     if rows:
         max_views = max([int(row[1]) for row in rows] or [1]) or 1
@@ -441,15 +556,18 @@ def format_channel_seo_report(report):
         ])
     elif report["analytics_error"]:
         lines.extend(["📈 Watch-time/growth graph:", report["analytics_error"]])
-    lines.extend(["", "🔎 Lowest SEO scores — recent videos"])
-    for video in report["videos"]:
+    lines.extend(["", "🔎 Lowest SEO scores"])
+    for video in report["videos"][:5]:
         bars = "█" * (video["score"] // 10) + "░" * (10 - video["score"] // 10)
         lines.append(f"{bars} {video['score']}/100 — {video['title'][:42]}")
-        for suggestion in video["suggestions"][:2]:
-            lines.append("  • " + suggestion)
+    if report["weak_videos"]:
+        lines.append("\n🛠 Neeche har weak video ke liye alag Fix button milega.")
+    else:
+        lines.append("\n✅ Koi video 80 se kam SEO score par nahi hai.")
     lines.extend([
         "",
-        "SEO score title/description/tags/thumbnail completeness par based hai; ranking guarantee nahi.",
+        "SEO score metadata completeness hai, YouTube ranking ki guarantee nahi.",
+        "Har edit se pehle preview aur tumhari confirmation zaroori hai.",
     ])
     return "\n".join(lines)[:3900]
 
@@ -556,6 +674,56 @@ def process_update(update):
                 except Exception:
                     log.exception("SEO channel list failed")
                     send_tg(chat_id, "❌ Channel list load nahi hui.")
+            elif data.startswith("seofix:"):
+                parts = data.split(":", 2)
+                if len(parts) != 3:
+                    send_tg(chat_id, "Invalid SEO fix request.")
+                else:
+                    channel_id, video_id = parts[1], parts[2]
+                    user_id = str((query.get("from") or {}).get("id"))
+                    try:
+                        accounts = list_youtube_connections(user_id)
+                        if not any(a.get("channel_id") == channel_id for a in accounts):
+                            raise RuntimeError("Ye channel tumhare account se connected nahi hai.")
+                        metadata = seo_fix_preview(user_id, channel_id, video_id)
+                        pending = SEO_FIX_PENDING[f"{user_id}:{channel_id}:{video_id}"]
+                        preview = (
+                            "🔍 SEO FIX PREVIEW\n\n"
+                            "Current title:\n" + pending["original"]["title"][:180] +
+                            "\n\nProposed title:\n" + metadata["title"][:180] +
+                            "\n\nProposed description:\n" + metadata["description"][:900] +
+                            "\n\nProposed tags:\n" + ", ".join(metadata["tags"][:15]) +
+                            "\n\n⚠️ Abhi YouTube par kuch change nahi hua. Kya is video ko update karna hai?"
+                        )
+                        tg("sendMessage", {"chat_id": chat_id, "text": preview[:3500],
+                            "reply_markup": {"inline_keyboard": [
+                                [{"text": "✅ Confirm & Update This Video",
+                                  "callback_data": "seoapply:" + channel_id + ":" + video_id}],
+                                [{"text": "❌ Cancel", "callback_data": "seocancel:" + channel_id + ":" + video_id}]]}})
+                    except Exception as exc:
+                        log.exception("SEO fix preview failed")
+                        send_tg(chat_id, "❌ SEO preview nahi ban paya: " + str(exc)[:250])
+            elif data.startswith("seoapply:"):
+                parts = data.split(":", 2)
+                if len(parts) == 3:
+                    channel_id, video_id = parts[1], parts[2]
+                    user_id = str((query.get("from") or {}).get("id"))
+                    try:
+                        accounts = list_youtube_connections(user_id)
+                        if not any(a.get("channel_id") == channel_id for a in accounts):
+                            raise RuntimeError("Ye channel tumhare account se connected nahi hai.")
+                        metadata = apply_confirmed_seo_fix(user_id, channel_id, video_id)
+                        send_tg(chat_id, "✅ Is video ka SEO update ho gaya.\n\nNew title: "
+                            + metadata["title"] + "\nTags: " + ", ".join(metadata["tags"][:10]))
+                    except Exception as exc:
+                        log.exception("Confirmed SEO update failed")
+                        send_tg(chat_id, "❌ SEO update nahi hua: " + str(exc)[:250])
+            elif data.startswith("seocancel:"):
+                parts = data.split(":", 2)
+                if len(parts) == 3:
+                    key = f"{(query.get('from') or {}).get('id')}:{parts[1]}:{parts[2]}"
+                    SEO_FIX_PENDING.pop(key, None)
+                    send_tg(chat_id, "❎ Is video ka SEO edit cancel kar diya. Koi change nahi hua.")
             elif data.startswith("seo:"):
                 channel_id = data.split(":", 1)[1]
                 try:
@@ -564,6 +732,7 @@ def process_update(update):
                         raise RuntimeError("Ye channel tumhare account se connected nahi hai.")
                     report = build_channel_seo_report(query.get("from", {}).get("id"), channel_id)
                     send_tg(chat_id, format_channel_seo_report(report))
+                    send_weak_seo_video_actions(chat_id, channel_id, report["weak_videos"])
                 except Exception as exc:
                     log.exception("SEO report failed")
                     send_tg(chat_id, "❌ SEO report nahi ban payi: " + str(exc)[:300])
