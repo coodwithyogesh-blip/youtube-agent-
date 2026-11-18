@@ -15,9 +15,10 @@ class SocialDraftTests(unittest.TestCase):
         self.assertIn("shop opening", draft["caption"])
         self.assertIn("Facebook", draft["caption"])
 
-    def test_rejects_unsupported_platform(self):
-        with self.assertRaises(ValueError):
-            build_social_draft("snapchat", "hello")
+    def test_snapchat_draft_is_supported(self):
+        draft = build_social_draft("snapchat", "new gaming clip")
+        self.assertEqual(draft["platform"], "snapchat")
+        self.assertIn("#Snapchat", draft["hashtags"])
 
     def test_rejects_empty_topic(self):
         with self.assertRaises(ValueError):
