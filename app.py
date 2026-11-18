@@ -23,6 +23,7 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = int(os.getenv("MAX_UPLOAD_MB", "90")) * 1024 * 1024
 SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl", "https://www.googleapis.com/auth/youtube.upload", "https://www.googleapis.com/auth/yt-analytics.readonly"]
 DONE = set()
+LAST_COMMENT_SCAN = {}
 OAUTH_STATES = set()
 MEDIA = {}
 AUTO_THREAD_STARTED = False
@@ -232,33 +233,42 @@ def comment_has_owner_reply(thread, channel_id):
                for reply in replies)
 
 def list_recent_comments(service, channel_id):
-    channel = service.channels().list(part="contentDetails", id=channel_id).execute()
-    items = channel.get("items", [])
-    if not items:
-        raise RuntimeError("Connected YouTube channel could not be loaded")
-    uploads = items[0]["contentDetails"]["relatedPlaylists"]["uploads"]
-    playlist = service.playlistItems().list(part="snippet", playlistId=uploads, maxResults=10).execute()
+    now = datetime.now(timezone.utc)
+    cutoff = LAST_COMMENT_SCAN.get(channel_id, now - timedelta(hours=24)) - timedelta(minutes=3)
     results = []
-    for item in playlist.get("items", []):
-        sn = item["snippet"]
-        video_id = sn["resourceId"]["videoId"]
-        try:
-            threads = service.commentThreads().list(part="snippet,replies", videoId=video_id,
-                maxResults=100, order="time", textFormat="plainText").execute()
-        except HttpError as exc:
-            if getattr(exc.resp, "status", None) in (403, 404):
-                continue
-            raise
-        for thread in threads.get("items", []):
-            if comment_has_owner_reply(thread, channel_id):
-                continue
+    page_token = None
+    while True:
+        response = service.commentThreads().list(
+            part="snippet,replies",
+            allThreadsRelatedToChannelId=channel_id,
+            maxResults=100, order="time", textFormat="plainText",
+            pageToken=page_token
+        ).execute()
+        stop = False
+        for thread in response.get("items", []):
             top = thread["snippet"]["topLevelComment"]
-            c = top["snippet"]
-            results.append({"id": top["id"], "video_id": video_id,
-                "title": sn.get("title", ""),
-                "text": c.get("textOriginal", c.get("textDisplay", ""))})
+            comment = top["snippet"]
+            if ((comment.get("authorChannelId") or {}).get("value") == channel_id
+                    or comment_has_owner_reply(thread, channel_id)):
+                continue
+            published = comment.get("publishedAt")
+            if published:
+                try:
+                    published_at = datetime.fromisoformat(published.replace("Z", "+00:00"))
+                    if published_at < cutoff:
+                        stop = True
+                        break
+                except ValueError:
+                    pass
+            results.append({
+                "id": top["id"], "video_id": comment.get("videoId", ""),
+                "title": "", "text": comment.get("textOriginal", comment.get("textDisplay", "")),
+            })
+        if stop or not response.get("nextPageToken"):
+            break
+        page_token = response["nextPageToken"]
+    LAST_COMMENT_SCAN[channel_id] = now
     return results
-
 
 def auto_reply_scan_for_service(service, channel_id):
     count = 0
