@@ -9,8 +9,20 @@ import requests
 RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
 
 
+def _retry_delay(response, attempt):
+    """Honor Gemini Retry-After when supplied; otherwise use capped backoff."""
+    headers = getattr(response, "headers", {}) or {}
+    retry_after = headers.get("Retry-After")
+    if retry_after:
+        try:
+            return min(max(float(retry_after), 1.0), 60.0)
+        except (TypeError, ValueError):
+            pass
+    return min(2 ** (attempt + 1), 30)
+
+
 def generate_content_with_fallback(api_key, model, payload, timeout=60,
-                                  fallback_model=None, max_attempts=4):
+                                  fallback_model=None, max_attempts=6):
     """Call Gemini GenerateContent with bounded retries and one model fallback.
 
     Transient HTTP/network failures use exponential backoff. A fallback model is
@@ -29,8 +41,9 @@ def generate_content_with_fallback(api_key, model, payload, timeout=60,
 
     last_status = None
     last_network_error = None
+    attempts = max(1, int(max_attempts))
     for model_index, model_name in enumerate(models):
-        for attempt in range(max(1, int(max_attempts))):
+        for attempt in range(attempts):
             url = ("https://generativelanguage.googleapis.com/v1beta/models/"
                    f"{model_name}:generateContent")
             try:
@@ -44,8 +57,8 @@ def generate_content_with_fallback(api_key, model, payload, timeout=60,
                             f"Gemini API request failed with HTTP {status}. "
                             "Check API key permissions, quota, and request settings."
                         )
-                    if attempt + 1 < max_attempts and status in RETRYABLE_STATUS_CODES:
-                        time.sleep(min(2 ** (attempt + 1), 16))
+                    if attempt + 1 < attempts and status in RETRYABLE_STATUS_CODES:
+                        time.sleep(_retry_delay(response, attempt))
                         continue
                     break
                 return response.json()
@@ -61,8 +74,8 @@ def generate_content_with_fallback(api_key, model, payload, timeout=60,
                         ) from None
                 else:
                     last_network_error = type(exc).__name__
-                if attempt + 1 < max_attempts and (status is None or status in RETRYABLE_STATUS_CODES):
-                    time.sleep(min(2 ** (attempt + 1), 16))
+                if attempt + 1 < attempts and (status is None or status in RETRYABLE_STATUS_CODES):
+                    time.sleep(_retry_delay(response, attempt))
                     continue
                 break
         # Try the fallback only after transient failure or model-not-found.
