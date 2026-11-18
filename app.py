@@ -22,6 +22,7 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = int(os.getenv("MAX_UPLOAD_MB", "90")) * 1024 * 1024
 SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl", "https://www.googleapis.com/auth/youtube.upload", "https://www.googleapis.com/auth/yt-analytics.readonly"]
 DONE = set()
+COMMENT_PENDING_COUNTS = {}  # in-memory counts only; never stores comment text
 # Telegram may retry a webhook update while a slow AI/video upload is running.
 # Remember update IDs before processing so duplicate media updates are ignored.
 DONE_TELEGRAM_UPDATES = set()
@@ -135,7 +136,7 @@ def ai_reply(comment, video_title=""):
     if not key:
         raise RuntimeError("GEMINI_API_KEY is required for AI comment replies")
     model = env("GEMINI_MODEL", "gemini-3.8-flash")
-    fallback_model = env("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash")
+    fallback_model = env("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash-lite")
     prompt = ("Write one short, natural, respectful YouTube creator reply. Do not invent facts, "
         "promise anything, request personal data, or include links. For medical, legal, financial "
         "or private requests, politely say the creator cannot advise.\n"
@@ -144,7 +145,7 @@ def ai_reply(comment, video_title=""):
         key, model,
         {"contents":[{"parts":[{"text":prompt}]}],
          "generationConfig":{"temperature":0.4,"maxOutputTokens":160}},
-        timeout=35, fallback_model=fallback_model)
+        timeout=35, fallback_model=fallback_model, max_attempts=6)
     return data["candidates"][0]["content"]["parts"][0]["text"].strip()[:900]
 
 def authorized(user_id, chat_id):
@@ -332,6 +333,7 @@ def list_recent_comments(service, channel_id):
 
 def auto_reply_scan_for_service(service, channel_id, telegram_user_id=None):
     count = 0
+    failed_ids = []
     notification_chat_id = telegram_user_id or env("TELEGRAM_OWNER_ID")
     comments = list_recent_comments(service, channel_id)
     for comment in comments:
@@ -339,32 +341,37 @@ def auto_reply_scan_for_service(service, channel_id, telegram_user_id=None):
         if cid in DONE or not should_auto_reply(comment["text"]):
             continue
         try:
-            # generate_content_with_fallback retries 429/5xx with bounded
-            # exponential delays on both primary and fallback Gemini models.
             reply = ai_reply(comment["text"], comment["title"])
+            service.comments().insert(part="snippet",
+                body={"snippet": {"parentId": cid, "textOriginal": reply}}).execute()
         except Exception:
-            log.exception("AI reply failed; comment %s remains pending for retry", cid)
-            raise
-        service.comments().insert(part="snippet",
-            body={"snippet": {"parentId": cid, "textOriginal": reply}}).execute()
-        # Mark complete immediately after YouTube confirms the reply. A
-        # Telegram notification failure must not cause a duplicate YouTube reply.
+            # Keep this comment pending, but do not let one Gemini quota error
+            # block other eligible comments in the same channel scan.
+            failed_ids.append(cid)
+            log.exception("Comment %s remains pending; it will be retried on the next scan", cid)
+            continue
+
+        # Mark complete only after YouTube confirms that the reply was posted.
         DONE.add(cid)
         count += 1
         log.info("Auto-replied to YouTube comment %s on channel %s", cid, channel_id)
         if notification_chat_id:
             try:
                 send_tg(notification_chat_id,
-                    "✅ Replied to your comment successfully!\n"
-                    "Channel: " + str(channel_id) + "\n"
+                    "✅ Replied to your comment successfully!\\n"
+                    "Channel: " + str(channel_id) + "\\n"
                     "Comment: " + str(comment["text"])[:180])
             except Exception:
                 log.exception("Telegram success notification failed for comment %s", cid)
-    # Advance only after the entire fetched batch has been processed. If Gemini
-    # or YouTube fails above, this line is skipped and the comments are fetched again.
+
+    # Store only a count, never comment/reply text. Every scan fetches all pages,
+    # so failed comments remain eligible for retry without a Sheets write.
+    COMMENT_PENDING_COUNTS[channel_id] = len(failed_ids)
+    if failed_ids:
+        log.warning("%s YouTube comments remain pending for channel %s",
+                    len(failed_ids), channel_id)
     LAST_COMMENT_SCAN[channel_id] = datetime.now(timezone.utc)
     return count
-
 
 def auto_reply_scan():
     service = yt()
@@ -986,15 +993,17 @@ def process_update(update):
         return
     if text.startswith("/comments"):
         try:
-            # Manual scan deliberately resets the cursor so comments from the
-            # last 24 hours are reconsidered, including comments missed by a
-            # previous cursor position. Successfully replied threads are
-            # filtered by YouTube's existing owner-reply check.
+            # Manually scan all accessible unanswered comment threads, not only
+            # the last 24 hours. Successful owner replies are filtered by YouTube.
             LAST_COMMENT_SCAN.clear()
+            COMMENT_PENDING_COUNTS.clear()
             count = scan_all_connected_channels(raise_errors=True)
-            send_tg(chat_id, f"✅ Manual 24-hour comment rescan complete. New replies posted: {count}")
-            if count == 0:
-                send_tg(chat_id, "ℹ️ Is scan mein koi eligible unanswered comment nahi mila. Agar Gemini 429/API error hua, uska error ab alag se dikhaya jayega.")
+            pending = sum(COMMENT_PENDING_COUNTS.values())
+            send_tg(chat_id, f"✅ Full unanswered-comment scan complete. New replies posted: {count}")
+            if pending:
+                send_tg(chat_id, f"⏳ {pending} comment(s) could not be replied to because of a temporary AI/YouTube error. They remain pending for the next scan.")
+            elif count == 0:
+                send_tg(chat_id, "ℹ️ Koi eligible unanswered comment nahi mila.")
         except Exception as exc:
             send_tg(chat_id, "❌ Comment scan/retry failed: " + str(exc)[:500])
         return
