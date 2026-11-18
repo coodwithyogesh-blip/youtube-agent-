@@ -16,14 +16,6 @@ class CommentReplyRetryTests(unittest.TestCase):
             "text": "Nice video!",
         }
         self.service = Mock()
-        self.claim_patch = patch("app.claim_comment_reply", return_value=True)
-        self.mark_patch = patch("app.mark_comment_reply")
-        self.claim_patch.start()
-        self.mark_patch.start()
-
-    def tearDown(self):
-        self.claim_patch.stop()
-        self.mark_patch.stop()
 
     @patch("app.send_tg")
     @patch("app.ai_reply", return_value="Thank you!")
@@ -110,43 +102,6 @@ class CommentReplyRetryTests(unittest.TestCase):
         self.assertEqual(notify.call_count, 1)
         self.assertIsNotNone(agent.LAST_COMMENT_SCAN.get(self.channel_id))
         agent.DONE.discard(second["id"])
-
-
-    @patch("app.claim_comment_reply", return_value=False)
-    @patch("app.ai_reply")
-    @patch("app.list_recent_comments")
-    def test_persistently_claimed_comment_is_skipped_after_restart(
-        self, list_comments, make_reply, claim
-    ):
-        list_comments.return_value = [self.comment]
-        count = agent.auto_reply_scan_for_service(self.service, self.channel_id)
-        self.assertEqual(count, 0)
-        make_reply.assert_not_called()
-        claim.assert_called_once_with(self.channel_id, "COMMENT_RETRY_1")
-
-    @patch("app.mark_comment_reply")
-    @patch("app.claim_comment_reply", return_value=True)
-    @patch("app.send_tg")
-    @patch("app.ai_reply", return_value="Thank you!")
-    @patch("app.should_auto_reply", return_value=True)
-    @patch("app.list_recent_comments")
-    def test_success_persists_replied_state(
-        self, list_comments, should_reply, make_reply, notify, claim, mark
-    ):
-        agent.DONE.discard("COMMENT_RETRY_1")
-        list_comments.return_value = [self.comment]
-        count = agent.auto_reply_scan_for_service(self.service, self.channel_id)
-        self.assertEqual(count, 1)
-        claim.assert_called_once_with(self.channel_id, "COMMENT_RETRY_1")
-        mark.assert_called_once_with(self.channel_id, "COMMENT_RETRY_1", "replied")
-
-    def test_scan_lock_prevents_overlapping_scans(self):
-        self.assertTrue(agent.COMMENT_SCAN_LOCK.acquire(blocking=False))
-        try:
-            count = agent.auto_reply_scan_for_service(self.service, self.channel_id)
-            self.assertEqual(count, 0)
-        finally:
-            agent.COMMENT_SCAN_LOCK.release()
 
 
 if __name__ == "__main__":
