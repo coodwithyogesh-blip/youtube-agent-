@@ -1,4 +1,6 @@
 import json
+import base64
+import mimetypes
 import os
 import re
 import time
@@ -124,7 +126,7 @@ def social_video_prompt(platform, caption=""):
     )
 
 
-def generate_video_metadata(api_key, model, video_path, filename, caption="", platform="youtube"):
+def generate_video_metadata(api_key, model, video_path, filename, caption="", platform="youtube", thumbnail_path=None):
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is required for automatic video metadata")
     endpoint = "https://generativelanguage.googleapis.com/upload/v1beta/files"
@@ -166,12 +168,21 @@ def generate_video_metadata(api_key, model, video_path, filename, caption="", pl
                 "when clear; otherwise use English. Never claim anything not shown. "
                 f"Uploader note/Telegram caption: {caption[:1000]}"
             )
+        parts = [{"text": prompt},
+                 {"file_data": {"mime_type": file_info.get("mimeType", "video/mp4"),
+                                "file_uri": file_uri}}]
+        if thumbnail_path:
+            with open(thumbnail_path, "rb") as image_stream:
+                image_bytes = image_stream.read()
+            image_mime = mimetypes.guess_type(thumbnail_path)[0] or "image/jpeg"
+            parts.append({"inline_data": {"mime_type": image_mime,
+                                          "data": base64.b64encode(image_bytes).decode("ascii")}})
+            prompt += " Also inspect the supplied thumbnail image for visual context, but do not mistake thumbnail-only elements as events occurring in the video."
+            parts[0]["text"] = prompt
         generated = generate_content_with_fallback(
             api_key, model,
-            {"contents":[{"parts":[{"text":prompt},
-                    {"file_data":{"mime_type":file_info.get("mimeType","video/mp4"),
-                                  "file_uri":file_uri}}]}],
-             "generationConfig":{"temperature":0.35,"responseMimeType":"application/json"}},
+            {"contents": [{"parts": parts}],
+             "generationConfig": {"temperature": 0.35, "responseMimeType": "application/json"}},
             timeout=120, fallback_model=os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash"))
         text = generated["candidates"][0]["content"]["parts"][0]["text"]
         return clean_generated_metadata(json.loads(text))
