@@ -71,5 +71,37 @@ class CommentReplyRetryTests(unittest.TestCase):
         self.assertEqual([item["id"] for item in comments], ["OLD_COMMENT_2D"])
 
 
+    @patch("app.send_tg")
+    @patch("app.ai_reply")
+    @patch("app.should_auto_reply", return_value=True)
+    @patch("app.list_recent_comments")
+    def test_one_gemini_failure_does_not_block_later_comments(
+        self, list_comments, should_reply, make_reply, notify
+    ):
+        second = {
+            "id": "COMMENT_RETRY_2",
+            "video_id": "VIDEO_2",
+            "title": "Second video",
+            "text": "Great!",
+        }
+        agent.DONE.discard(second["id"])
+        list_comments.return_value = [self.comment, second]
+        make_reply.side_effect = [
+            RuntimeError("Gemini HTTP 429"),
+            "Thanks for watching!",
+        ]
+
+        count = agent.auto_reply_scan_for_service(
+            self.service, self.channel_id, telegram_user_id="12345"
+        )
+
+        self.assertEqual(count, 1)
+        self.assertNotIn(self.comment["id"], agent.DONE)
+        self.assertIn(second["id"], agent.DONE)
+        self.assertEqual(notify.call_count, 1)
+        self.assertIsNotNone(agent.LAST_COMMENT_SCAN.get(self.channel_id))
+        agent.DONE.discard(second["id"])
+
+
 if __name__ == "__main__":
     unittest.main()
