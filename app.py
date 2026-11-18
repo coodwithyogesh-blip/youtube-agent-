@@ -216,8 +216,65 @@ def start_auto_worker():
 def ensure_worker():
     start_auto_worker()
 
+def main_menu_keyboard():
+    return {"inline_keyboard": [
+        [{"text": "▶️ YouTube", "callback_data": "platform_youtube"},
+         {"text": "📸 Instagram", "callback_data": "platform_instagram"}],
+        [{"text": "📘 Facebook", "callback_data": "platform_facebook"},
+         {"text": "👻 Snapchat", "callback_data": "platform_snapchat"}],
+        [{"text": "💬 Comment Replies", "callback_data": "comments"},
+         {"text": "⚙️ Settings", "callback_data": "settings"}],
+    ]}
+
+
+def main_menu_text(first_name=""):
+    greeting = f" {first_name}" if first_name else ""
+    return ("👋 Welcome" + greeting + " to Social Media Agent!\\n\\n"
+            "Apna platform choose karo. Account connections aur per-user automation "
+            "abhi development mein hain; koi account bina authorization access nahi hoga.")
+
+
+def callback_response(data):
+    messages = {
+        "platform_youtube": ("▶️ YouTube\\n\\nAbhi existing YouTube upload feature owner ke "
+            "configured channel par kaam karta hai. Har user ka alag YouTube OAuth connection "
+            "abhi ready nahi hai."),
+        "platform_instagram": ("📸 Instagram\\n\\nInstagram account connection abhi available "
+            "nahi hai. Secure official login/API integration next step mein banegi."),
+        "platform_facebook": ("📘 Facebook\\n\\nFacebook account connection abhi available "
+            "nahi hai. Secure official login/API integration next step mein banegi."),
+        "platform_snapchat": ("👻 Snapchat\\n\\nSnapchat account connection abhi available "
+            "nahi hai. Platform access/approval requirements check karne honge."),
+        "comments": ("💬 Comment Replies\\n\\nAI/Manual reply selection abhi per-user "
+            "workflow mein active nahi hai. Current automatic YouTube replies legacy owner "
+            "configuration use karte hain."),
+        "settings": ("⚙️ Settings\\n\\nTumhari registration aur default settings Google "
+            "Sheets mein save hoti hain. Per-user reply mode aur polling controls abhi "
+            "implement nahi hue hain."),
+    }
+    return messages.get(data, "Unknown option. /menu bhejkar dobara try karo.")
+
+
 def process_update(update):
-    if "callback_query" in update: return
+    if "callback_query" in update:
+        query = update.get("callback_query") or {}
+        data = query.get("data", "")
+        message = query.get("message") or {}
+        chat = message.get("chat") or {}
+        chat_id = chat.get("id")
+        tg("answerCallbackQuery", {"callback_query_id": query.get("id", "")})
+        if chat_id and chat.get("type") == "private":
+            if data == "menu":
+                tg("editMessageText", {"chat_id": chat_id,
+                    "message_id": message.get("message_id"),
+                    "text": main_menu_text((query.get("from") or {}).get("first_name", "")),
+                    "reply_markup": main_menu_keyboard()})
+            elif data in ("platform_youtube", "platform_instagram", "platform_facebook",
+                          "platform_snapchat", "comments", "settings"):
+                tg("sendMessage", {"chat_id": chat_id, "text": callback_response(data),
+                    "reply_markup": {"inline_keyboard": [
+                        [{"text": "⬅️ Main Menu", "callback_data": "menu"}]]}})
+        return
     message = update.get("message") or {}
     chat, user = message.get("chat") or {}, message.get("from") or {}
     chat_id, user_id = chat.get("id"), user.get("id")
@@ -230,7 +287,9 @@ def process_update(update):
             return
         try:
             register_user(user_id, chat_id, user.get("username", ""), user.get("first_name", ""))
-            send_tg(chat_id, "👋 Welcome to Social Media Agent!\n\n✅ Tumhara Telegram account Google Sheets mein register ho gaya.\n\nℹ️ YouTube/Instagram/Facebook/Snapchat account connection abhi agle development step mein hai. Filhaal bot kisi doosre user ke account ko access nahi karega.")
+            tg("sendMessage", {"chat_id": chat_id,
+                "text": main_menu_text(user.get("first_name", "")) + "\\n\\n✅ Telegram account Google Sheets mein registered.",
+                "reply_markup": main_menu_keyboard()})
         except Exception:
             log.exception("Google Sheets user registration failed")
             send_tg(chat_id, "❌ Registration abhi complete nahi hua. Bot owner ko Google Sheets credentials aur Sheet ID configure karni hogi.")
@@ -239,8 +298,9 @@ def process_update(update):
         if message.get("video") or message.get("photo") or message.get("document"):
             send_tg(chat_id,"⛔ Owner-only bot. Telegram owner ID / group ID check failed.")
         return
-    if text.startswith(("/start","/help")):
-        send_tg(chat_id,"🎬 YouTube Agent\nSirf video bhejo, phir uska thumbnail photo bhejo. AI video analyse karke title, description, tags aur hashtags banayega aur YouTube par upload karega.\n/comments — abhi ke comments par auto-reply scan.\n/status — settings check.")
+    if text.startswith(("/menu", "/help", "/start")):
+        tg("sendMessage", {"chat_id": chat_id, "text": main_menu_text(user.get("first_name", "")),
+            "reply_markup": main_menu_keyboard()})
         return
     if text.startswith("/status"):
         send_tg(chat_id,"YouTube configured: "+("yes" if env("YOUTUBE_REFRESH_TOKEN") else "no")+
@@ -346,7 +406,7 @@ def set_webhook():
         return jsonify(error="unauthorized"),401
     base=env("RENDER_EXTERNAL_URL").rstrip("/")
     result=tg("setWebhook",{"url":base+"/telegram/webhook","secret_token":env("TELEGRAM_WEBHOOK_SECRET"),
-        "allowed_updates":["message"],"drop_pending_updates":False})
+        "allowed_updates":["message","callback_query"],"drop_pending_updates":False})
     return jsonify(ok=True,result=result)
 
 @app.errorhandler(Exception)
