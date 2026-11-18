@@ -249,11 +249,11 @@ def main_menu_keyboard():
     return {"inline_keyboard": [
         [{"text": "▶️ YouTube", "callback_data": "platform_youtube"},
          {"text": "👤 My Accounts", "callback_data": "my_accounts"}],
-         {"text": "📸 Instagram", "callback_data": "platform_instagram"}],
-        [{"text": "📘 Facebook", "callback_data": "platform_facebook"},
-         {"text": "👻 Snapchat", "callback_data": "platform_snapchat"}],
-        [{"text": "💬 Comment Replies", "callback_data": "comments"},
-         {"text": "⚙️ Settings", "callback_data": "settings"}],
+        [{"text": "📸 Instagram", "callback_data": "platform_instagram"},
+         {"text": "📘 Facebook", "callback_data": "platform_facebook"}],
+        [{"text": "👻 Snapchat", "callback_data": "platform_snapchat"},
+         {"text": "💬 Comment Replies", "callback_data": "comments"}],
+        [{"text": "⚙️ Settings", "callback_data": "settings"}],
     ]}
 
 
