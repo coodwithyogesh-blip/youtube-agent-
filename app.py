@@ -303,7 +303,22 @@ def process_update(update):
                     "message_id": message.get("message_id"),
                     "text": main_menu_text((query.get("from") or {}).get("first_name", "")),
                     "reply_markup": main_menu_keyboard()})
-            elif data in ("platform_youtube", "platform_instagram", "platform_facebook",
+            elif data == "platform_youtube":
+                try:
+                    state = make_youtube_oauth_state(query.get("from", {}).get("id"))
+                    base = env("RENDER_EXTERNAL_URL").rstrip("/")
+                    if not base or not env("YOUTUBE_CLIENT_ID") or not env("YOUTUBE_CLIENT_SECRET"):
+                        raise RuntimeError("Google OAuth client settings are missing in Render")
+                    connect_url = base + "/oauth/youtube/start?state=" + urllib.parse.quote(state)
+                    tg("sendMessage", {"chat_id": chat_id,
+                        "text": "▶️ YouTube account connect karne ke liye neeche button dabao. Google par login/permission ke baad channel tumhare Telegram account se link hoga.",
+                        "reply_markup": {"inline_keyboard": [
+                            [{"text": "🔗 Connect YouTube", "url": connect_url}],
+                            [{"text": "⬅️ Main Menu", "callback_data": "menu"}]]}})
+                except Exception as exc:
+                    log.exception("YouTube OAuth link creation failed")
+                    send_tg(chat_id, "❌ YouTube connect setup error: " + str(exc)[:300])
+            elif data in ("platform_instagram", "platform_facebook",
                           "platform_snapchat", "comments", "settings"):
                 tg("sendMessage", {"chat_id": chat_id, "text": callback_response(data),
                     "reply_markup": {"inline_keyboard": [
