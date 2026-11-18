@@ -158,6 +158,7 @@ def record_session_reference(user_id, platform, session_ref, status="stored"):
 
 
 def save_youtube_connection(user_id, account_name, channel_id, encrypted_refresh_token):
+    """Upsert one channel per Telegram user; preserve other connected channels."""
     now = datetime.now(timezone.utc).isoformat()
     with _LOCK:
         _ensure_tabs()
@@ -167,7 +168,8 @@ def save_youtube_connection(user_id, account_name, channel_id, encrypted_refresh
         ).execute().get("values", [])
         row_number = None
         for idx, row in enumerate(rows[1:], start=2):
-            if len(row) > 1 and str(row[0]) == str(user_id) and row[1] == "youtube":
+            if (len(row) > 6 and str(row[0]) == str(user_id)
+                    and row[1] == "youtube" and row[6] == channel_id):
                 row_number = idx
                 break
         values = [[str(user_id), "youtube", account_name, "connected", now, now,
@@ -185,7 +187,7 @@ def save_youtube_connection(user_id, account_name, channel_id, encrypted_refresh
             ).execute()
     return True
 
-    
+
 def list_youtube_connections(user_id):
     """Return this Telegram user's YouTube metadata, never refresh tokens."""
     with _LOCK:
@@ -202,3 +204,22 @@ def list_youtube_connections(user_id):
                 "channel_id": row[6] if len(row) > 6 else "",
             })
     return accounts
+
+
+def get_youtube_connection(user_id, channel_id):
+    """Return one user's encrypted refresh token for the exact selected channel."""
+    with _LOCK:
+        _ensure_tabs()
+        rows = _api().spreadsheets().values().get(
+            spreadsheetId=_sheet_id(), range="'Accounts'!A:H"
+        ).execute().get("values", [])
+    for row in rows[1:]:
+        if (len(row) >= 8 and str(row[0]) == str(user_id)
+                and row[1] == "youtube" and row[6] == channel_id
+                and row[3] == "connected"):
+            return {
+                "account_name": row[2],
+                "channel_id": row[6],
+                "refresh_token_enc": row[7],
+            }
+    return None
