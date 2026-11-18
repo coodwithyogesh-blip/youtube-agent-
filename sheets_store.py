@@ -19,6 +19,7 @@ SCHEMAS = {
     "Upload_History": ["telegram_user_id", "platform", "video_id", "video_url", "title", "uploaded_at", "status"],
     "Comments": ["telegram_user_id", "platform", "comment_id", "video_id", "comment_text", "reply_text", "reply_mode", "replied_at", "status"],
     "Sessions": ["telegram_user_id", "platform", "session_ref", "encrypted", "status", "updated_at"],
+    "Content_Drafts": ["telegram_user_id", "platform", "topic", "caption", "hashtags", "created_at", "status"],
 }
 
 
@@ -223,3 +224,27 @@ def get_youtube_connection(user_id, channel_id):
                 "refresh_token_enc": row[7],
             }
     return None
+
+def save_social_draft(user_id, draft):
+    now = datetime.now(timezone.utc).isoformat()
+    _append("Content_Drafts", [
+        user_id, draft["platform"], draft["topic"], draft["caption"],
+        draft["hashtags"], now, "draft"
+    ])
+    return True
+
+
+def list_social_drafts(user_id, limit=5):
+    with _LOCK:
+        _ensure_tabs()
+        rows = _api().spreadsheets().values().get(
+            spreadsheetId=_sheet_id(), range="'Content_Drafts'!A:G"
+        ).execute().get("values", [])
+    items = []
+    for row in rows[1:]:
+        if len(row) >= 7 and str(row[0]) == str(user_id):
+            items.append({
+                "platform": row[1], "topic": row[2], "caption": row[3],
+                "hashtags": row[4], "created_at": row[5], "status": row[6],
+            })
+    return items[-max(1, min(int(limit), 20)):][::-1]
