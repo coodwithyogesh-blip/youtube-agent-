@@ -184,3 +184,21 @@ def save_youtube_connection(user_id, account_name, channel_id, encrypted_refresh
                 body={"values": values}
             ).execute()
     return True
+
+    
+def list_youtube_connections(user_id):
+    """Return this Telegram user's YouTube metadata, never refresh tokens."""
+    with _LOCK:
+        _ensure_tabs()
+        rows = _api().spreadsheets().values().get(
+            spreadsheetId=_sheet_id(), range="'Accounts'!A:H"
+        ).execute().get("values", [])
+    accounts = []
+    for row in rows[1:]:
+        if len(row) >= 7 and str(row[0]) == str(user_id) and row[1] == "youtube":
+            accounts.append({
+                "account_name": row[2] if len(row) > 2 else "",
+                "connection_status": row[3] if len(row) > 3 else "",
+                "channel_id": row[6] if len(row) > 6 else "",
+            })
+    return accounts
