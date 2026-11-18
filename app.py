@@ -303,7 +303,9 @@ def comment_has_owner_reply(thread, channel_id):
 
 def list_recent_comments(service, channel_id):
     now = datetime.now(timezone.utc)
-    cutoff = LAST_COMMENT_SCAN.get(channel_id, now - timedelta(hours=24)) - timedelta(minutes=3)
+    # First scan after startup (and an explicit /comments reset) looks back
+    # seven days so older unanswered comments are not silently missed.
+    cutoff = LAST_COMMENT_SCAN.get(channel_id, now - timedelta(days=7)) - timedelta(minutes=3)
     results = []
     page_token = None
     while True:
