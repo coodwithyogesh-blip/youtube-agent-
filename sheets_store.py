@@ -18,7 +18,6 @@ SCHEMAS = {
     "Settings": ["telegram_user_id", "reply_mode", "manual_reply_text", "comment_poll_seconds", "updated_at"],
     "Upload_History": ["telegram_user_id", "platform", "video_id", "video_url", "title", "uploaded_at", "status"],
     "Comments": ["telegram_user_id", "platform", "comment_id", "video_id", "comment_text", "reply_text", "reply_mode", "replied_at", "status"],
-    "Comment_Reply_Ledger": ["channel_id", "comment_id", "status", "updated_at"],
     "Sessions": ["telegram_user_id", "platform", "session_ref", "encrypted", "status", "updated_at"],
     "Content_Drafts": ["telegram_user_id", "platform", "topic", "caption", "hashtags", "created_at", "status"],
 }
@@ -225,66 +224,6 @@ def get_youtube_connection(user_id, channel_id):
                 "refresh_token_enc": row[7],
             }
     return None
-
-
-def claim_comment_reply(channel_id, comment_id, stale_after_seconds=900):
-    """Persist a short-lived claim without storing comment or reply text."""
-    now = datetime.now(timezone.utc)
-    with _LOCK:
-        _ensure_tabs()
-        api, sid = _api(), _sheet_id()
-        rows = api.spreadsheets().values().get(
-            spreadsheetId=sid, range="'Comment_Reply_Ledger'!A:D"
-        ).execute().get("values", [])
-        row_number = None
-        for idx, row in enumerate(rows[1:], start=2):
-            if len(row) >= 2 and row[0] == str(channel_id) and row[1] == str(comment_id):
-                row_number = idx
-                status = row[2] if len(row) > 2 else ""
-                updated = row[3] if len(row) > 3 else ""
-                if status == "replied":
-                    return False
-                if status == "processing":
-                    try:
-                        age = (now - datetime.fromisoformat(updated)).total_seconds()
-                    except (TypeError, ValueError):
-                        age = stale_after_seconds + 1
-                    if age < stale_after_seconds:
-                        return False
-                break
-        values = [[str(channel_id), str(comment_id), "processing", now.isoformat()]]
-        if row_number:
-            api.spreadsheets().values().update(
-                spreadsheetId=sid, range=f"'Comment_Reply_Ledger'!A{row_number}",
-                valueInputOption="RAW", body={"values": values}
-            ).execute()
-        else:
-            api.spreadsheets().values().append(
-                spreadsheetId=sid, range="'Comment_Reply_Ledger'!A:D",
-                valueInputOption="RAW", insertDataOption="INSERT_ROWS",
-                body={"values": values}
-            ).execute()
-        return True
-
-
-def mark_comment_reply(channel_id, comment_id, status):
-    if status not in ("replied", "pending"):
-        raise ValueError("Invalid comment reply ledger status")
-    now = datetime.now(timezone.utc).isoformat()
-    with _LOCK:
-        _ensure_tabs()
-        api, sid = _api(), _sheet_id()
-        rows = api.spreadsheets().values().get(
-            spreadsheetId=sid, range="'Comment_Reply_Ledger'!A:D"
-        ).execute().get("values", [])
-        for idx, row in enumerate(rows[1:], start=2):
-            if len(row) >= 2 and row[0] == str(channel_id) and row[1] == str(comment_id):
-                api.spreadsheets().values().update(
-                    spreadsheetId=sid, range=f"'Comment_Reply_Ledger'!C{idx}",
-                    valueInputOption="RAW", body={"values": [[status, now]]}
-                ).execute()
-                return True
-        raise RuntimeError("Comment reply ledger claim not found")
 
 def save_social_draft(user_id, draft):
     now = datetime.now(timezone.utc).isoformat()
