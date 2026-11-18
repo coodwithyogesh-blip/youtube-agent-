@@ -28,6 +28,7 @@ MEDIA = {}
 SEO_FIX_PENDING = {}
 # Social drafts are deliberately process-memory only; never write them to Google Sheets.
 SOCIAL_DRAFTS = {}
+SOCIAL_MEDIA = {}  # temporary video files; never persisted
 AUTO_THREAD_STARTED = False
 TELEGRAM_API = "https://api.telegram.org/bot"
 
@@ -228,6 +229,68 @@ def receive_media(message, chat_id, user_id):
     if item.get("video") and item.get("thumbnail"):
         upload_telegram_pair(chat_id)
     return True
+
+def remove_social_media(chat_id):
+    item = SOCIAL_MEDIA.pop(str(chat_id), {})
+    path = item.get("video")
+    if path and os.path.isfile(path):
+        try: os.remove(path)
+        except OSError: pass
+
+
+def receive_social_video(message, chat_id, user_id):
+    item = SOCIAL_MEDIA.get(str(chat_id))
+    if not item or item.get("user_id") != str(user_id):
+        return False
+    obj = message.get("video") or message.get("document")
+    if not obj or (message.get("document") and not (obj.get("mime_type") or "").startswith("video/")):
+        send_tg(chat_id, "Video file bhejo (20 MB tak).")
+        return True
+    path = telegram_download(obj["file_id"], ".mp4")
+    item.update({"video": path, "filename": obj.get("file_name") or "video.mp4",
+                 "caption": message.get("caption", "")})
+    try:
+        send_tg(chat_id, "🎬 Video mil gaya. AI visuals aur audio/speech analyse kar raha hai…")
+        metadata = generate_video_metadata(env("GEMINI_API_KEY"),
+            env("GEMINI_MODEL", "gemini-3.8-flash"), path, item["filename"],
+            item["caption"], platform=item["platform"])
+        item["social_metadata"] = metadata
+        send_tg(chat_id, "✅ " + item["platform"].title() + " ready-to-post content:\n\n"
+            + metadata["description"][:1800] + "\n\nHashtags: "
+            + " ".join(metadata["hashtags"])
+            + "\n\nDirect Instagram/Facebook/Snapchat posting official API ke bina supported nahi hai. "
+              "Kya isi video ko YouTube par bhi upload karna hai?")
+        tg("sendMessage", {"chat_id": chat_id, "text": "YouTube upload karna hai?",
+            "reply_markup": {"inline_keyboard": [
+                [{"text": "✅ Haan", "callback_data": "socialyt_yes"},
+                 {"text": "❌ Nahi", "callback_data": "socialyt_no"}]]}})
+    except Exception as exc:
+        log.exception("Social video analysis failed")
+        remove_social_media(chat_id)
+        send_tg(chat_id, "❌ Video analyse nahi hua: " + str(exc)[:350])
+    return True
+
+
+def upload_social_video_to_youtube(chat_id, user_id, channel_id):
+    item = SOCIAL_MEDIA.get(str(chat_id), {})
+    if not item.get("video") or item.get("user_id") != str(user_id):
+        raise RuntimeError("Video session expire ho gaya. Video dobara bhejo.")
+    metadata = generate_video_metadata(env("GEMINI_API_KEY"),
+        env("GEMINI_MODEL", "gemini-3.8-flash"), item["video"],
+        item.get("filename", "video.mp4"), item.get("caption", ""), platform="youtube")
+    body = build_video_metadata(metadata["title"], metadata["description"],
+        json.dumps(metadata["tags"]), "public", None)
+    service = youtube_service_for_user(user_id, channel_id)
+    media = MediaFileUpload(item["video"], chunksize=8*1024*1024,
+        resumable=True, mimetype="video/mp4")
+    video_id = service.videos().insert(part="snippet,status",
+        body=body, media_body=media).execute()["id"]
+    send_tg(chat_id, "✅ YouTube Public upload ho gaya!\nTitle: " + metadata["title"]
+        + "\nTags: " + ", ".join(metadata["tags"][:10])
+        + "\nHashtags: " + " ".join(metadata["hashtags"])
+        + "\nhttps://youtu.be/" + video_id)
+    remove_social_media(chat_id)
+
 
 def comment_has_owner_reply(thread, channel_id):
     replies = (thread.get("replies") or {}).get("comments", [])
@@ -611,16 +674,9 @@ def callback_response(data):
         "platform_youtube": ("▶️ YouTube\n\nAbhi existing YouTube upload feature owner ke "
             "configured channel par kaam karta hai. Har user ka alag YouTube OAuth connection "
             "abhi ready nahi hai."),
-        "platform_instagram": ("📸 Instagram Content Studio\n\nDraft ke liye bhejo:\n"
-            "/draft instagram | apna topic\n\nDraft Google Sheets mein save hoga. "
-            "🔒 Password/cookies nahi maange, collect ya save nahi honge. "
-            "📝 Posting manually Instagram app par karni hogi."),
-        "platform_facebook": ("📘 Facebook Content Studio\n\nDraft ke liye bhejo:\n"
-            "/draft facebook | apna topic\n\nDraft Google Sheets mein save hoga. "
-            "🔒 Password/cookies nahi maange, collect ya save nahi honge. "
-            "📝 Posting manually Facebook app par karni hogi."),
-        "platform_snapchat": ("👻 Snapchat\n\nSnapchat account connection abhi available "
-            "nahi hai. Platform access/approval requirements check karne honge."),
+        "platform_instagram": "📸 Instagram selected. Ab video bhejo; AI visuals/audio analyse karke caption banayega.",
+        "platform_facebook": "📘 Facebook selected. Ab video bhejo; AI visuals/audio analyse karke post banayega.",
+        "platform_snapchat": "👻 Snapchat selected. Ab video bhejo; AI visuals/audio analyse karke Spotlight caption banayega.",
         "comments": ("💬 YouTube Auto Comment Replies\n\nConnected channels ke comments "
             "har 2 minute mein check honge. AI relevant replies post karega; spam/links "
             "skip honge. Comment/reply text Google Sheets mein save nahi hota."),
@@ -737,6 +793,42 @@ def process_update(update):
                 except Exception as exc:
                     log.exception("SEO report failed")
                     send_tg(chat_id, "❌ SEO report nahi ban payi: " + str(exc)[:300])
+            elif data in ("platform_instagram", "platform_facebook", "platform_snapchat"):
+                platform = data.replace("platform_", "")
+                remove_social_media(chat_id)
+                SOCIAL_MEDIA[str(chat_id)] = {"platform": platform,
+                    "user_id": str((query.get("from") or {}).get("id"))}
+                send_tg(chat_id, callback_response(data) + "\n\n20 MB tak ka video bhejo.")
+            elif data == "socialyt_no":
+                remove_social_media(chat_id)
+                send_tg(chat_id, "Theek hai. YouTube upload nahi kiya; temporary video delete kar di.")
+            elif data == "socialyt_yes":
+                user_id = str((query.get("from") or {}).get("id"))
+                item = SOCIAL_MEDIA.get(str(chat_id), {})
+                if not item.get("video") or item.get("user_id") != user_id:
+                    send_tg(chat_id, "Video session expire ho gaya. Dobara video bhejo.")
+                else:
+                    accounts = list_youtube_connections(user_id)
+                    rows = [[{"text": "▶️ " + (a.get("account_name") or "YouTube channel")[:30],
+                              "callback_data": "socialytselect:" + a["channel_id"]}]
+                            for a in accounts if a.get("channel_id")]
+                    if rows:
+                        tg("sendMessage", {"chat_id": chat_id,
+                            "text": "YouTube channel select karo:",
+                            "reply_markup": {"inline_keyboard": rows}})
+                    else:
+                        send_tg(chat_id, "Pehle YouTube account connect karo. Video session temporary rahega.")
+            elif data.startswith("socialytselect:"):
+                channel_id = data.split(":", 1)[1]
+                user_id = str((query.get("from") or {}).get("id"))
+                try:
+                    if not any(a.get("channel_id") == channel_id
+                               for a in list_youtube_connections(user_id)):
+                        raise RuntimeError("Connected channel nahi mila.")
+                    upload_social_video_to_youtube(chat_id, user_id, channel_id)
+                except Exception as exc:
+                    log.exception("Social-to-YouTube upload failed")
+                    send_tg(chat_id, "❌ YouTube upload nahi hua: " + str(exc)[:350])
             elif data == "upload_video":
                 try:
                     accounts = list_youtube_connections(query.get("from", {}).get("id"))
@@ -841,6 +933,14 @@ def process_update(update):
             send_tg(chat_id, "❌ " + str(exc))
         return
     if message.get("video") or message.get("photo") or message.get("document"):
+        if chat.get("type") == "private" and str(chat_id) in SOCIAL_MEDIA:
+            try:
+                if receive_social_video(message, chat_id, user_id):
+                    return
+            except Exception as exc:
+                log.exception("Social video receive failed")
+                send_tg(chat_id, "❌ Media receive error: " + str(exc)[:350])
+                return
         if chat.get("type") != "private":
             send_tg(chat_id, "Security ke liye upload private Telegram chat mein karo.")
             return
