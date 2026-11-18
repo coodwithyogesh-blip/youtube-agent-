@@ -9,7 +9,9 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 from upload_utils import parse_publish_at, build_video_metadata
 from ai_utils import generate_video_metadata, should_auto_reply, generate_content_with_fallback
-from sheets_store import register_user
+from sheets_store import register_user, save_youtube_connection
+from cryptography.fernet import Fernet
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 log = logging.getLogger("youtube-agent")
@@ -24,6 +26,38 @@ TELEGRAM_API = "https://api.telegram.org/bot"
 
 def env(name, default=""):
     return os.getenv(name, default).strip()
+
+
+def youtube_oauth_state_serializer():
+    secret = env("OAUTH_STATE_SECRET")
+    if not secret:
+        raise RuntimeError("OAUTH_STATE_SECRET is not configured")
+    return URLSafeTimedSerializer(secret, salt="youtube-multi-user-oauth")
+
+
+def make_youtube_oauth_state(user_id):
+    nonce = secrets.token_urlsafe(24)
+    OAUTH_STATES.add(nonce)
+    return youtube_oauth_state_serializer().dumps({"user_id": int(user_id), "nonce": nonce})
+
+
+def read_youtube_oauth_state(value):
+    try:
+        data = youtube_oauth_state_serializer().loads(value, max_age=600)
+    except (BadSignature, SignatureExpired):
+        return None
+    nonce = data.get("nonce")
+    if not nonce or nonce not in OAUTH_STATES:
+        return None
+    OAUTH_STATES.discard(nonce)
+    return data
+
+
+def encrypt_refresh_token(token):
+    key = env("TOKEN_ENCRYPTION_KEY")
+    if not key:
+        raise RuntimeError("TOKEN_ENCRYPTION_KEY is not configured")
+    return Fernet(key.encode("utf-8")).encrypt(token.encode("utf-8")).decode("utf-8")
 
 def telegram_html(value):
     return html.escape(str(value or ""), quote=False)
