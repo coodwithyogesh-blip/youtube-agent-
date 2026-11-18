@@ -29,3 +29,25 @@ def score_video_seo(video):
     if not checks["thumbnail"]:
         suggestions.append("Custom, readable thumbnail upload karo.")
     return {"score": score, "checks": checks, "suggestions": suggestions}
+
+
+def weak_seo_videos(videos, threshold=80):
+    """Return every video below the metadata-completeness threshold."""
+    return [video for video in videos
+            if int(video.get("score", 0) or 0) < int(threshold)]
+
+
+def seo_score_distribution(videos):
+    """Count videos in stable score bands for the Telegram SEO graph."""
+    bands = {"poor": 0, "fair": 0, "good": 0, "excellent": 0}
+    for video in videos:
+        score = max(0, min(100, int(video.get("score", 0) or 0)))
+        if score < 40:
+            bands["poor"] += 1
+        elif score < 70:
+            bands["fair"] += 1
+        elif score < 90:
+            bands["good"] += 1
+        else:
+            bands["excellent"] += 1
+    return bands
