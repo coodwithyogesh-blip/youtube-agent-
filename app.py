@@ -304,7 +304,9 @@ def main_menu_keyboard():
 def main_menu_text(first_name=""):
     greeting = f" {first_name}" if first_name else ""
     return ("👋 Welcome" + greeting + " to Social Media Agent!\n\n"
-            "Apna platform choose karo. YouTube account connect karke My Accounts mein dekh sakte ho.")
+            "Apna platform choose karo. YouTube account connect karke My Accounts mein dekh sakte ho.\n\n"
+            "🔒 Security: Instagram/Facebook password ya cookies kabhi nahi maange, collect ya save nahi kiye jaate.\n"
+            "📝 Instagram/Facebook posting abhi manually app mein karni hogi; bot sirf drafts banata aur Google Sheets mein save karta hai.")
 
 
 def format_youtube_accounts(accounts):
@@ -325,10 +327,12 @@ def callback_response(data):
             "abhi ready nahi hai."),
         "platform_instagram": ("📸 Instagram Content Studio\n\nDraft ke liye bhejo:\n"
             "/draft instagram | apna topic\n\nDraft Google Sheets mein save hoga. "
-            "Posting manually Instagram app par karni hogi."),
+            "🔒 Password/cookies nahi maange, collect ya save nahi honge. "
+            "📝 Posting manually Instagram app par karni hogi."),
         "platform_facebook": ("📘 Facebook Content Studio\n\nDraft ke liye bhejo:\n"
             "/draft facebook | apna topic\n\nDraft Google Sheets mein save hoga. "
-            "Posting manually Facebook app par karni hogi."),
+            "🔒 Password/cookies nahi maange, collect ya save nahi honge. "
+            "📝 Posting manually Facebook app par karni hogi."),
         "platform_snapchat": ("👻 Snapchat\n\nSnapchat account connection abhi available "
             "nahi hai. Platform access/approval requirements check karne honge."),
         "comments": ("💬 Comment Replies\n\nAI/Manual reply selection abhi per-user "
@@ -467,7 +471,9 @@ def process_update(update):
                 "✅ Social draft Google Sheets mein save ho gaya.\n"
                 f"Platform: {draft['platform'].title()}\n\n"
                 f"{draft['caption']}\n\n{draft['hashtags']}\n\n"
-                "Copy karke app par manually post karo. /drafts se saved drafts dekh sakte ho.")
+                "🔒 Password/cookies collect ya save nahi hote. "
+                "Copy karke Instagram/Facebook app par manually post karo. "
+                "/drafts se saved drafts dekh sakte ho.")
         except ValueError as exc:
             send_tg(chat_id, "❌ " + str(exc))
         except Exception:
