@@ -76,5 +76,24 @@ class AIFeatureTests(unittest.TestCase):
         self.assertFalse(should_auto_reply("Please share your phone number and address"))
         self.assertTrue(should_auto_reply("Nice gameplay bro!"))
 
+
+    @patch("ai_utils.time.sleep")
+    @patch("ai_utils.requests.post")
+    def test_retries_rate_limit_with_bounded_backoff_before_success(self, post, sleep):
+        failed = Mock(status_code=429, headers={})
+        succeeded = Mock(status_code=200)
+        succeeded.json.return_value = {"ok": True}
+        post.side_effect = [failed, failed, failed, failed, failed, succeeded]
+
+        result = generate_content_with_fallback(
+            "secret", "gemini-3.8-flash", {"contents": []},
+            fallback_model=None, max_attempts=6
+        )
+
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(post.call_count, 6)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list],
+                         [2, 4, 8, 16, 30])
+
 if __name__ == "__main__":
     unittest.main()
