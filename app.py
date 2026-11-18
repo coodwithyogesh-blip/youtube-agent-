@@ -230,7 +230,7 @@ def process_update(update):
             return
         try:
             register_user(user_id, chat_id, user.get("username", ""), user.get("first_name", ""))
-            send_tg(chat_id, "👋 Welcome to Social Media Agent!\\n\\n✅ Tumhara Telegram account Google Sheets mein register ho gaya.\\n\\nNext: /connect se apne social accounts connect karne ka setup shuru hoga. Abhi account connection feature setup mein hai; kisi doosre user ka account use nahi hoga.")
+            send_tg(chat_id, "👋 Welcome to Social Media Agent!\\n\\n✅ Tumhara Telegram account Google Sheets mein register ho gaya.\\n\\nℹ️ YouTube/Instagram/Facebook/Snapchat account connection abhi agle development step mein hai. Filhaal bot kisi doosre user ke account ko access nahi karega.")
         except Exception:
             log.exception("Google Sheets user registration failed")
             send_tg(chat_id, "❌ Registration abhi complete nahi hua. Bot owner ko Google Sheets credentials aur Sheet ID configure karni hogi.")
