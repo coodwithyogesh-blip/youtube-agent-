@@ -10,8 +10,7 @@ from googleapiclient.http import MediaFileUpload
 from upload_utils import parse_publish_at, build_video_metadata
 from ai_utils import (generate_video_metadata, should_auto_reply, generate_content_with_fallback, clean_generated_metadata)
 from sheets_store import (register_user, save_youtube_connection, list_youtube_connections,
-                          get_youtube_connection, list_all_youtube_connections,
-                          save_social_draft, list_social_drafts)
+                          get_youtube_connection, list_all_youtube_connections)
 from youtube_insights import (comment_poll_interval, score_video_seo, weak_seo_videos, seo_score_distribution)
 from social_drafts import build_social_draft
 from cryptography.fernet import Fernet
@@ -27,6 +26,8 @@ LAST_COMMENT_SCAN = {}
 OAUTH_STATES = set()
 MEDIA = {}
 SEO_FIX_PENDING = {}
+# Social drafts are deliberately process-memory only; never write them to Google Sheets.
+SOCIAL_DRAFTS = {}
 AUTO_THREAD_STARTED = False
 TELEGRAM_API = "https://api.telegram.org/bot"
 
@@ -591,7 +592,7 @@ def main_menu_text(first_name=""):
     return ("👋 Welcome" + greeting + " to Social Media Agent!\n\n"
             "Apna platform choose karo. YouTube account connect karke My Accounts mein dekh sakte ho.\n\n"
             "🔒 Security: Instagram/Facebook password ya cookies kabhi nahi maange, collect ya save nahi kiye jaate.\n"
-            "📝 Instagram/Facebook posting abhi manually app mein karni hogi; bot sirf drafts banata aur Google Sheets mein save karta hai.")
+            "📝 Instagram/Facebook/Snapchat drafts temporary memory mein rahenge; Google Sheets mein save nahi honge.")
 
 
 def format_youtube_accounts(accounts):
@@ -807,21 +808,17 @@ def process_update(update):
             "reply_markup": main_menu_keyboard()})
         return
     if text.startswith("/drafts"):
-        try:
-            drafts = list_social_drafts(user_id, 5)
-            if not drafts:
-                send_tg(chat_id, "Abhi koi saved social draft nahi hai. /draft instagram | topic bhejo.")
-            else:
-                lines = ["📝 Tumhare latest social drafts:"]
-                for index, draft in enumerate(drafts, 1):
-                    lines.append(
-                        f"\n{index}. {draft['platform'].title()} — {draft['topic']}\n"
-                        f"{draft['caption']}\n{draft['hashtags']}"
-                    )
-                send_tg(chat_id, "\n".join(lines)[:3900])
-        except Exception:
-            log.exception("Could not list social drafts")
-            send_tg(chat_id, "❌ Drafts load nahi hue. Google Sheets setup check karo.")
+        drafts = SOCIAL_DRAFTS.get(str(user_id), [])[-5:][::-1]
+        if not drafts:
+            send_tg(chat_id, "Abhi koi temporary social draft nahi hai. /draft instagram | topic bhejo.")
+        else:
+            lines = ["📝 Latest temporary social drafts (Google Sheets mein save nahi):"]
+            for index, draft in enumerate(drafts, 1):
+                lines.append(
+                    f"\n{index}. {draft['platform'].title()} — {draft['topic']}\n"
+                    f"{draft['caption']}\n{draft['hashtags']}"
+                )
+            send_tg(chat_id, "\n".join(lines)[:3900])
         return
     if text.startswith("/draft "):
         try:
@@ -830,19 +827,18 @@ def process_update(update):
                 raise ValueError("Format: /draft instagram | apna topic")
             platform, topic = payload.split("|", 1)
             draft = build_social_draft(platform, topic)
-            save_social_draft(user_id, draft)
+            drafts = SOCIAL_DRAFTS.setdefault(str(user_id), [])
+            drafts.append(draft)
+            del drafts[:-20]
             send_tg(chat_id,
-                "✅ Social draft Google Sheets mein save ho gaya.\n"
+                "✅ Draft temporary memory mein rakha hai (Google Sheets mein save nahi hua).\n"
                 f"Platform: {draft['platform'].title()}\n\n"
                 f"{draft['caption']}\n\n{draft['hashtags']}\n\n"
                 "🔒 Password/cookies collect ya save nahi hote. "
-                "Copy karke Instagram/Facebook app par manually post karo. "
-                "/drafts se saved drafts dekh sakte ho.")
+                "Copy karke platform app par manually post karo. /drafts se dekho. "
+                "Bot restart hone par temporary drafts clear ho sakte hain.")
         except ValueError as exc:
             send_tg(chat_id, "❌ " + str(exc))
-        except Exception:
-            log.exception("Could not save social draft")
-            send_tg(chat_id, "❌ Draft save nahi hua. Google Sheets access check karo.")
         return
     if message.get("video") or message.get("photo") or message.get("document"):
         if chat.get("type") != "private":
