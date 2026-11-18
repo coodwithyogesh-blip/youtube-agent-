@@ -9,7 +9,8 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 from upload_utils import parse_publish_at, build_video_metadata
 from ai_utils import generate_video_metadata, should_auto_reply, generate_content_with_fallback
-from sheets_store import (register_user, save_youtube_connection, list_youtube_connections,\n                          get_youtube_connection)
+from sheets_store import (register_user, save_youtube_connection, list_youtube_connections,
+                          get_youtube_connection)
 from cryptography.fernet import Fernet
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
@@ -172,7 +173,8 @@ def upload_telegram_pair(chat_id):
                                     json.dumps(metadata["tags"]), "public", None)
         media = MediaFileUpload(item["video"], chunksize=8*1024*1024,
                                 resumable=True, mimetype=item.get("mime","video/mp4"))
-        service = youtube_service_for_user(item["user_id"], item["selected_channel_id"])\n        result = service.videos().insert(part="snippet,status", body=body, media_body=media).execute()
+        service = youtube_service_for_user(item["user_id"], item["selected_channel_id"])
+        result = service.videos().insert(part="snippet,status", body=body, media_body=media).execute()
         video_id = result["id"]
         if os.path.getsize(item["thumbnail"]) > 2*1024*1024:
             raise RuntimeError("Video upload ho gaya, lekin thumbnail 2 MB se bada hai. YouTube limit ke andar thumbnail bhejo.")
@@ -189,9 +191,13 @@ def upload_telegram_pair(chat_id):
     finally:
         remove_media(chat_id)
 
-def receive_media(message, chat_id):
+def receive_media(message, chat_id, user_id):
     key = str(chat_id)
     item = MEDIA.setdefault(key,{})
+    if not item.get("selected_channel_id"):
+        send_tg(chat_id, "Pehle Upload Video dabao aur apna YouTube channel select karo.")
+        return False
+    item["user_id"] = str(user_id)
     if message.get("video") or (message.get("document") and
             (message["document"].get("mime_type") or "").startswith("video/")):
         obj = message.get("video") or message["document"]
@@ -352,7 +358,8 @@ def process_update(update):
                     tg("sendMessage", {"chat_id": chat_id,
                         "text": format_youtube_accounts(accounts),
                         "reply_markup": {"inline_keyboard": [
-                            [{"text": "🔗 Connect YouTube", "callback_data": "platform_youtube"}],\n                            [{"text": "⬆️ Upload Video", "callback_data": "upload_video"}],
+                            [{"text": "🔗 Connect YouTube", "callback_data": "platform_youtube"}],
+                            [{"text": "⬆️ Upload Video", "callback_data": "upload_video"}],
                             [{"text": "⬅️ Main Menu", "callback_data": "menu"}]]}})
                 except Exception:
                     log.exception("Could not load connected accounts")
@@ -380,7 +387,8 @@ def process_update(update):
                     item["user_id"] = str(query.get("from", {}).get("id"))
                     item["selected_channel_id"] = channel_id
                     send_tg(chat_id, "✅ Selected: " + selected.get("account_name", "YouTube channel")
-                        + "\\nAb video bhejo, phir uska thumbnail photo bhejo.")
+                        + "
+Ab video bhejo, phir uska thumbnail photo bhejo.")
                 except Exception as exc:
                     send_tg(chat_id, "❌ " + str(exc)[:250])
             elif data == "platform_youtube":
@@ -427,9 +435,17 @@ def process_update(update):
         tg("sendMessage", {"chat_id": chat_id, "text": main_menu_text(user.get("first_name", "")),
             "reply_markup": main_menu_keyboard()})
         return
+    if message.get("video") or message.get("photo") or message.get("document"):
+        if chat.get("type") != "private":
+            send_tg(chat_id, "Security ke liye upload private Telegram chat mein karo.")
+            return
+        try:
+            receive_media(message, chat_id, user_id)
+        except Exception as exc:
+            log.exception("Telegram media download failed")
+            send_tg(chat_id, "❌ Media receive error: " + str(exc)[:500])
+        return
     if not authorized(user_id,chat_id):
-        if message.get("video") or message.get("photo") or message.get("document"):
-            send_tg(chat_id,"⛔ Owner-only bot. Telegram owner ID / group ID check failed.")
         return
     if text.startswith(("/menu", "/help", "/start")):
         tg("sendMessage", {"chat_id": chat_id, "text": main_menu_text(user.get("first_name", "")),
@@ -444,11 +460,6 @@ def process_update(update):
         try: send_tg(chat_id,f"✅ Auto replies posted: {auto_reply_scan()}")
         except Exception as exc: send_tg(chat_id,"❌ "+str(exc)[:500])
         return
-    if message.get("video") or message.get("photo") or message.get("document"):
-        try: receive_media(message,chat_id)
-        except Exception as exc:
-            log.exception("Telegram media download failed")
-            send_tg(chat_id,"❌ Media receive error: "+str(exc)[:500])
 
 @app.get("/")
 def home():
