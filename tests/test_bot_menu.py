@@ -23,7 +23,7 @@ class TelegramMenuTests(unittest.TestCase):
         self.assertIn("UC123", message)
 
     def test_my_accounts_shows_clear_empty_state(self):
-        self.assertIn("abhi connected nahi", format_youtube_accounts([]))
+        self.assertIn("Abhi connected nahi", format_youtube_accounts([]))
 
     def test_menu_greeting_uses_first_name(self):
         self.assertIn("Welcome Yogesh", main_menu_text("Yogesh"))
