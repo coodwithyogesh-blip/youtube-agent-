@@ -45,13 +45,14 @@ class CommentReplyRetryTests(unittest.TestCase):
     ):
         list_comments.return_value = [self.comment]
 
-        with self.assertRaisesRegex(RuntimeError, "429"):
-            agent.auto_reply_scan_for_service(
-                self.service, self.channel_id, telegram_user_id="12345"
-            )
+        count = agent.auto_reply_scan_for_service(
+            self.service, self.channel_id, telegram_user_id="12345"
+        )
 
+        self.assertEqual(count, 0)
         self.assertNotIn("COMMENT_RETRY_1", agent.DONE)
-        self.assertNotIn(self.channel_id, agent.LAST_COMMENT_SCAN)
+        self.assertEqual(agent.COMMENT_PENDING_COUNTS.get(self.channel_id), 1)
+        self.assertIsNotNone(agent.LAST_COMMENT_SCAN.get(self.channel_id))
 
     def test_first_scan_includes_unanswered_comments_older_than_seven_days(self):
         from datetime import datetime, timezone, timedelta
