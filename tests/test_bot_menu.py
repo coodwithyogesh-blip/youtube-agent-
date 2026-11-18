@@ -42,11 +42,12 @@ class YouTubeOAuthSecurityTests(unittest.TestCase):
         self.env.stop()
         OAUTH_STATES.clear()
 
-    def test_oauth_state_is_bound_to_telegram_user_and_single_use(self):
+    def test_oauth_state_is_signed_and_bound_to_telegram_user(self):
         state = make_youtube_oauth_state(123456)
         result = read_youtube_oauth_state(state)
         self.assertEqual(result["user_id"], 123456)
-        self.assertIsNone(read_youtube_oauth_state(state))
+        self.assertEqual(read_youtube_oauth_state(state)["user_id"], 123456)
+        self.assertIsNone(read_youtube_oauth_state(state + "tampered"))
 
     def test_refresh_token_is_encrypted_and_recoverable(self):
         key = os.environ["TOKEN_ENCRYPTION_KEY"]
