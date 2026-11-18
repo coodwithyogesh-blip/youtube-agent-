@@ -348,15 +348,26 @@ def build_channel_seo_report(user_id, channel_id):
         raise RuntimeError("YouTube channel not found")
     channel = channel_items[0]
     uploads = channel["contentDetails"]["relatedPlaylists"]["uploads"]
-    playlist = service.playlistItems().list(
-        part="snippet", playlistId=uploads, maxResults=50
-    ).execute()
-    video_ids = [x["snippet"]["resourceId"]["videoId"] for x in playlist.get("items", [])
-                 if x.get("snippet", {}).get("resourceId", {}).get("videoId")]
+    video_ids = []
+    page_token = None
+    while True:
+        playlist = service.playlistItems().list(
+            part="snippet", playlistId=uploads, maxResults=50,
+            pageToken=page_token
+        ).execute()
+        video_ids.extend(
+            x["snippet"]["resourceId"]["videoId"]
+            for x in playlist.get("items", [])
+            if x.get("snippet", {}).get("resourceId", {}).get("videoId")
+        )
+        page_token = playlist.get("nextPageToken")
+        if not page_token:
+            break
     videos = []
-    if video_ids:
+    for offset in range(0, len(video_ids), 50):
         data = service.videos().list(
-            part="snippet,statistics", id=",".join(video_ids[:50]), maxResults=50
+            part="snippet,statistics", id=",".join(video_ids[offset:offset + 50]),
+            maxResults=50
         ).execute()
         for item in data.get("items", []):
             sn = item.get("snippet", {})
@@ -394,6 +405,8 @@ def build_channel_seo_report(user_id, channel_id):
         "views": int(stats.get("viewCount", 0)),
         "video_count": int(stats.get("videoCount", 0)),
         "videos": sorted(videos, key=lambda x: x["score"])[:10],
+        "videos_analyzed": len(videos),
+        "average_seo": round(sum(v["score"] for v in videos) / len(videos)) if videos else 0,
         "analytics_rows": analytics_rows,
         "analytics_error": analytics_error,
     }
@@ -406,6 +419,8 @@ def format_channel_seo_report(report):
         "👥 Subscribers: " + format(report["subscribers"], ","),
         "👁 Lifetime views: " + format(report["views"], ","),
         "🎬 Total videos: " + format(report["video_count"], ","),
+        "🔎 Videos SEO checked: " + format(report["videos_analyzed"], ","),
+        "⭐ Average SEO score: " + str(report["average_seo"]) + "/100",
         "",
     ]
     rows = report["analytics_rows"]
