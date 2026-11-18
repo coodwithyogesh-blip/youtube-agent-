@@ -14,7 +14,7 @@ _SERVICE = None
 
 SCHEMAS = {
     "Users": ["telegram_user_id", "chat_id", "username", "first_name", "registered_at", "last_seen", "status"],
-    "Accounts": ["telegram_user_id", "platform", "account_name", "connection_status", "connected_at", "updated_at"],
+    "Accounts": ["telegram_user_id", "platform", "account_name", "connection_status", "connected_at", "updated_at", "channel_id", "refresh_token_enc"],
     "Settings": ["telegram_user_id", "reply_mode", "manual_reply_text", "comment_poll_seconds", "updated_at"],
     "Upload_History": ["telegram_user_id", "platform", "video_id", "video_url", "title", "uploaded_at", "status"],
     "Comments": ["telegram_user_id", "platform", "comment_id", "video_id", "comment_text", "reply_text", "reply_mode", "replied_at", "status"],
@@ -153,3 +153,33 @@ def record_session_reference(user_id, platform, session_ref, status="stored"):
     # session_ref must be an opaque reference, never a password or raw cookie.
     _append("Sessions", [user_id, platform, session_ref, "yes", status,
                          datetime.now(timezone.utc).isoformat()])
+
+
+
+def save_youtube_connection(user_id, account_name, channel_id, encrypted_refresh_token):
+    now = datetime.now(timezone.utc).isoformat()
+    with _LOCK:
+        _ensure_tabs()
+        api, sid = _api(), _sheet_id()
+        rows = api.spreadsheets().values().get(
+            spreadsheetId=sid, range="'Accounts'!A:H"
+        ).execute().get("values", [])
+        row_number = None
+        for idx, row in enumerate(rows[1:], start=2):
+            if len(row) > 1 and str(row[0]) == str(user_id) and row[1] == "youtube":
+                row_number = idx
+                break
+        values = [[str(user_id), "youtube", account_name, "connected", now, now,
+                   channel_id, encrypted_refresh_token]]
+        if row_number:
+            api.spreadsheets().values().update(
+                spreadsheetId=sid, range=f"'Accounts'!A{row_number}",
+                valueInputOption="RAW", body={"values": values}
+            ).execute()
+        else:
+            api.spreadsheets().values().append(
+                spreadsheetId=sid, range="'Accounts'!A:H",
+                valueInputOption="RAW", insertDataOption="INSERT_ROWS",
+                body={"values": values}
+            ).execute()
+    return True
