@@ -12,12 +12,12 @@ No manual title, description, tags or hashtags are required. An optional Telegra
 
 ## Automatic YouTube comment replies
 - `AUTO_REPLY_MODE=automatic` enables unattended AI replies.
-- The service checks recent comments every 15 minutes by default (`COMMENT_POLL_SECONDS`).
+- The service checks the latest 10 uploaded videos for new comments every 2 minutes by default (`COMMENT_POLL_SECONDS=120`). It scans every YouTube channel connected through Telegram OAuth, plus the legacy owner channel when no per-user channels are connected.
 - It skips comments already answered by the connected channel and filters obvious spam, links and some sensitive requests.
 - Gemini writes a short reply and YouTube publishes it without an approval button.
 - `/comments` manually triggers a scan; `/status` reports configuration.
 
-This is polling, not instant push notification. On Render Free, the service can sleep when idle; while asleep, comment scans do not run. Use an always-on service for reliable continuous monitoring. Processed-comment state is memory-only and resets on restart, but the code also checks existing channel replies before posting.
+This is polling, not instant push notification. On Render Free, the service can sleep when idle; while asleep, comment scans do not run. Use an always-on service for reliable continuous monitoring. Processed-comment IDs are memory-only and reset on restart; before replying the worker checks whether the channel has already replied. Comment text and generated replies are not written to Google Sheets.
 
 ## Web dashboard
 Open the Render service URL, enter `MANAGER_API_TOKEN`, select a video and your thumbnail, and submit. The dashboard also generates metadata from the video using Gemini. API: `POST /api/videos/upload-ai`.
@@ -32,10 +32,10 @@ Set these in Render Environment:
 - `GEMINI_API_KEY` (required for AI video metadata and AI comment replies)
 - `GEMINI_MODEL=gemini-3.8-flash` and `GEMINI_FALLBACK_MODEL=gemini-3.5-flash` (optional; bounded retries with exponential backoff are built in for transient 429/5xx/network failures)
 - `MANAGER_API_TOKEN`, `RENDER_EXTERNAL_URL`
-- `AUTO_REPLY_MODE=automatic`, `COMMENT_POLL_SECONDS=900`
+- `AUTO_REPLY_MODE=automatic`, `COMMENT_POLL_SECONDS=120`
 
 ## OAuth
-This app requests `youtube.force-ssl` and `youtube.upload`. After deploying, authorize again at `/oauth/start` and replace `YOUTUBE_REFRESH_TOKEN` in Render with the new token. Add exact redirect URI `https://YOUR-RENDER-HOST/oauth/callback` in Google Cloud OAuth settings. Never share the refresh token.
+This app requests `youtube.force-ssl`, `youtube.upload`, and `yt-analytics.readonly`. After deploying, reconnect each Telegram YouTube account so the new Analytics permission is granted. Enable the YouTube Analytics API in the same Google Cloud project. The SEO report shows channel totals, a 28-day views/watch-time/subscriber trend graph, and metadata-completeness scores for up to 50 recent videos. Add exact redirect URI `https://YOUR-RENDER-HOST/oauth/callback` in Google Cloud OAuth settings. Never share the refresh token.
 
 ## Render
 - Build: `pip install -r requirements.txt`
@@ -58,7 +58,7 @@ Setup:
 5. Add the two environment variables in Render and redeploy.
 6. Open the Telegram bot privately and send `/start`. The user should then appear in the Users tab.
 
-Important: Telegram users connect YouTube through the signed OAuth flow. Multiple channels can be stored for the same Telegram user; each channel refresh token is encrypted with TOKEN_ENCRYPTION_KEY. In Telegram, use Upload Video, select one of your own connected channels, then send the video and thumbnail. The upload service resolves the token by both Telegram user ID and selected channel ID, so one user cannot select another user's channel. The older web dashboard and automatic comment worker still use the legacy owner YOUTUBE_REFRESH_TOKEN; per-user comment moderation is a separate pending workflow. Instagram, Facebook and Snapchat are not yet connected. Passwords and raw browser cookies must never be stored in Sheets.
+Important: Telegram users connect YouTube through the signed OAuth flow. Multiple channels can be stored for the same Telegram user; each channel refresh token is encrypted with TOKEN_ENCRYPTION_KEY. In Telegram, use Upload Video, select one of your own connected channels, then send the video and thumbnail. The upload service resolves the token by both Telegram user ID and selected channel ID, so one user cannot select another user's channel. The legacy web dashboard still uses the owner `YOUTUBE_REFRESH_TOKEN`. Telegram comment monitoring uses each connected user's encrypted refresh token. Comment text and reply text are not stored in Sheets. Instagram, Facebook and Snapchat are not yet connected. Passwords and raw browser cookies must never be stored in Sheets.
 
 ## Storage and limitations
 No SQLite or Supabase. Media files are temporary and removed after upload. Telegram media, duplicate tracking and OAuth state are held in process memory and reset on restart. Test with a private/test channel first; this configuration publishes Telegram submissions publicly. Never share tokens.
