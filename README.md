@@ -12,7 +12,7 @@ No manual title, description, tags or hashtags are required. An optional Telegra
 
 ## Automatic YouTube comment replies
 - `AUTO_REPLY_MODE=automatic` enables unattended AI replies.
-- The service checks the latest 10 uploaded videos for new comments every 2 minutes by default (`COMMENT_POLL_SECONDS=120`). It scans every YouTube channel connected through Telegram OAuth, plus the legacy owner channel when no per-user channels are connected.
+- The service checks new comment threads across all videos on every YouTube channel connected through Telegram OAuth every 2 minutes. On first start it scans the last 24 hours, then checks from the previous scan time with a small overlap. The legacy owner channel is used only when no per-user channels are connected.
 - It skips comments already answered by the connected channel and filters obvious spam, links and some sensitive requests.
 - Gemini writes a short reply and YouTube publishes it without an approval button.
 - `/comments` manually triggers a scan; `/status` reports configuration.
@@ -32,7 +32,7 @@ Set these in Render Environment:
 - `GEMINI_API_KEY` (required for AI video metadata and AI comment replies)
 - `GEMINI_MODEL=gemini-3.8-flash` and `GEMINI_FALLBACK_MODEL=gemini-3.5-flash` (optional; bounded retries with exponential backoff are built in for transient 429/5xx/network failures)
 - `MANAGER_API_TOKEN`, `RENDER_EXTERNAL_URL`
-- `AUTO_REPLY_MODE=automatic`, `COMMENT_POLL_SECONDS=120`
+- `AUTO_REPLY_MODE=automatic`
 
 ## OAuth
 This app requests `youtube.force-ssl`, `youtube.upload`, and `yt-analytics.readonly`. After deploying, reconnect each Telegram YouTube account so the new Analytics permission is granted. Enable the YouTube Analytics API in the same Google Cloud project. The SEO report shows channel totals, a 28-day views/watch-time/subscriber trend graph, and metadata-completeness scores for up to 50 recent videos. Add exact redirect URI `https://YOUR-RENDER-HOST/oauth/callback` in Google Cloud OAuth settings. Never share the refresh token.
