@@ -1,7 +1,10 @@
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
-from ai_utils import clean_generated_metadata, social_video_prompt
+from ai_utils import (
+    clean_generated_metadata, generate_content_with_fallback, social_video_prompt
+)
 
 
 class SocialVideoMetadataTests(unittest.TestCase):
@@ -15,6 +18,27 @@ class SocialVideoMetadataTests(unittest.TestCase):
     def test_prompt_rejects_youtube_as_social_platform(self):
         with self.assertRaises(ValueError):
             social_video_prompt("youtube", "")
+
+    @patch("ai_utils.time.sleep")
+    @patch("ai_utils.requests.post")
+    def test_primary_503_retries_then_uses_fallback_model(self, post, sleep):
+        post.side_effect = [
+            SimpleNamespace(status_code=503, json=lambda: {}),
+            SimpleNamespace(status_code=503, json=lambda: {}),
+            SimpleNamespace(status_code=503, json=lambda: {}),
+            SimpleNamespace(status_code=503, json=lambda: {}),
+            SimpleNamespace(status_code=200, json=lambda: {"ok": True}),
+        ]
+
+        result = generate_content_with_fallback(
+            "test-key", "gemini-primary", {"contents": []},
+            fallback_model="gemini-3.5-flash-lite", max_attempts=4
+        )
+
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(post.call_count, 5)
+        self.assertIn("gemini-3.5-flash-lite", post.call_args.args[0])
+        self.assertEqual(sleep.call_count, 4)
 
     def test_metadata_is_cleaned_for_upload(self):
         result = clean_generated_metadata({
