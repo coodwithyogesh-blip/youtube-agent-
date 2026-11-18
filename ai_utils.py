@@ -103,7 +103,28 @@ def clean_generated_metadata(raw):
     return {"title": title, "description": description[:5000], "tags": tags[:500],
             "hashtags": hashtags}
 
-def generate_video_metadata(api_key, model, video_path, filename, caption=""):
+def social_video_prompt(platform, caption=""):
+    platform = str(platform or "").strip().lower()
+    prompts = {
+        "instagram": "Instagram Reels: write a concise, engaging caption, relevant hashtags, and searchable tags.",
+        "facebook": "Facebook video: write a natural community-friendly post caption, relevant hashtags, and searchable tags.",
+        "snapchat": "Snapchat Spotlight: write a very short punchy caption and a small set of relevant hashtags and tags.",
+    }
+    if platform not in prompts:
+        raise ValueError("Social platform must be instagram, facebook, or snapchat")
+    return (
+        "Analyze BOTH the actual visual content and the audio/speech in this video. "
+        "Do not invent people, events, claims, or details that are not clearly visible or audible. "
+        + prompts[platform]
+        + " Return ONLY valid JSON with keys title, description, tags, hashtags. "
+        "Use the video's language when clear; otherwise use English. "
+        "Description is the platform-ready caption/post. "
+        "Provide 5-12 relevant tags and 3-8 hashtags. Avoid keyword stuffing. "
+        f"Creator note: {str(caption or '')[:1000]}"
+    )
+
+
+def generate_video_metadata(api_key, model, video_path, filename, caption="", platform="youtube"):
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is required for automatic video metadata")
     endpoint = "https://generativelanguage.googleapis.com/upload/v1beta/files"
@@ -132,16 +153,19 @@ def generate_video_metadata(api_key, model, video_path, filename, caption=""):
             time.sleep(2)
         else:
             raise RuntimeError("Gemini video processing timed out")
-        prompt = (
-            "Analyze the actual video content and create YouTube SEO metadata. "
-            "Return ONLY valid JSON with keys title, description, tags, hashtags. "
-            "Title must be accurate, engaging, and <=100 characters. Description should "
-            "summarize only visible/audible content, include a natural call to action, "
-            "and not invent names, events, links, or claims. Provide 10-20 relevant tags "
-            "and 3-8 relevant hashtags without keyword stuffing. Use the video's language "
-            "when clear; otherwise use English. Never claim anything not shown. "
-            f"Uploader note/Telegram caption: {caption[:1000]}"
-        )
+        if str(platform or "youtube").lower() in ("instagram", "facebook", "snapchat"):
+            prompt = social_video_prompt(platform, caption)
+        else:
+            prompt = (
+                "Analyze the actual video content and create YouTube SEO metadata. "
+                "Return ONLY valid JSON with keys title, description, tags, hashtags. "
+                "Title must be accurate, engaging, and <=100 characters. Description should "
+                "summarize only visible/audible content, include a natural call to action, "
+                "and not invent names, events, links, or claims. Provide 10-20 relevant tags "
+                "and 3-8 relevant hashtags without keyword stuffing. Use the video's language "
+                "when clear; otherwise use English. Never claim anything not shown. "
+                f"Uploader note/Telegram caption: {caption[:1000]}"
+            )
         generated = generate_content_with_fallback(
             api_key, model,
             {"contents":[{"parts":[{"text":prompt},
