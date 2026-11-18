@@ -9,6 +9,7 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 from upload_utils import parse_publish_at, build_video_metadata
 from ai_utils import generate_video_metadata, should_auto_reply, generate_content_with_fallback
+from sheets_store import register_user
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 log = logging.getLogger("youtube-agent")
@@ -222,6 +223,18 @@ def process_update(update):
     chat_id, user_id = chat.get("id"), user.get("id")
     text = (message.get("text") or "").strip()
     if not chat_id: return
+    # Public onboarding: registration is per Telegram user and stored in Google Sheets.
+    if text.startswith("/start") or text.startswith("/help"):
+        if chat.get("type") != "private":
+            send_tg(chat_id, "Please mujhe private chat mein /start bhejo, taaki tumhara account alag register ho sake.")
+            return
+        try:
+            register_user(user_id, chat_id, user.get("username", ""), user.get("first_name", ""))
+            send_tg(chat_id, "👋 Welcome to Social Media Agent!\\n\\n✅ Tumhara Telegram account Google Sheets mein register ho gaya.\\n\\nNext: /connect se apne social accounts connect karne ka setup shuru hoga. Abhi account connection feature setup mein hai; kisi doosre user ka account use nahi hoga.")
+        except Exception:
+            log.exception("Google Sheets user registration failed")
+            send_tg(chat_id, "❌ Registration abhi complete nahi hua. Bot owner ko Google Sheets credentials aur Sheet ID configure karni hogi.")
+        return
     if not authorized(user_id,chat_id):
         if message.get("video") or message.get("photo") or message.get("document"):
             send_tg(chat_id,"⛔ Owner-only bot. Telegram owner ID / group ID check failed.")
