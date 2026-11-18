@@ -294,6 +294,10 @@ def process_update(update):
             log.exception("Google Sheets user registration failed")
             send_tg(chat_id, "❌ Registration abhi complete nahi hua. Bot owner ko Google Sheets credentials aur Sheet ID configure karni hogi.")
         return
+    if text.startswith("/menu"):
+        tg("sendMessage", {"chat_id": chat_id, "text": main_menu_text(user.get("first_name", "")),
+            "reply_markup": main_menu_keyboard()})
+        return
     if not authorized(user_id,chat_id):
         if message.get("video") or message.get("photo") or message.get("document"):
             send_tg(chat_id,"⛔ Owner-only bot. Telegram owner ID / group ID check failed.")
