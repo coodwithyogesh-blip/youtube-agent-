@@ -38,7 +38,7 @@ class SocialVideoMetadataTests(unittest.TestCase):
         self.assertEqual(result, {"ok": True})
         self.assertEqual(post.call_count, 5)
         self.assertIn("gemini-3.5-flash-lite", post.call_args.args[0])
-        self.assertEqual(sleep.call_count, 4)
+        self.assertEqual(sleep.call_count, 3)
 
     def test_metadata_is_cleaned_for_upload(self):
         result = clean_generated_metadata({
