@@ -1,5 +1,5 @@
 import os, hmac, json, logging, secrets, urllib.parse, html, tempfile, threading, time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from flask import Flask, request, jsonify, redirect, Response
 from werkzeug.exceptions import HTTPException
 import requests
@@ -10,7 +10,9 @@ from googleapiclient.http import MediaFileUpload
 from upload_utils import parse_publish_at, build_video_metadata
 from ai_utils import generate_video_metadata, should_auto_reply, generate_content_with_fallback
 from sheets_store import (register_user, save_youtube_connection, list_youtube_connections,
-                          get_youtube_connection, save_social_draft, list_social_drafts)
+                          get_youtube_connection, list_all_youtube_connections,
+                          save_social_draft, list_social_drafts)
+from youtube_insights import comment_poll_interval, score_video_seo
 from social_drafts import build_social_draft
 from cryptography.fernet import Fernet
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
@@ -19,7 +21,7 @@ logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 log = logging.getLogger("youtube-agent")
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = int(os.getenv("MAX_UPLOAD_MB", "90")) * 1024 * 1024
-SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl", "https://www.googleapis.com/auth/youtube.upload"]
+SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl", "https://www.googleapis.com/auth/youtube.upload", "https://www.googleapis.com/auth/yt-analytics.readonly"]
 DONE = set()
 OAUTH_STATES = set()
 MEDIA = {}
@@ -65,19 +67,21 @@ def decrypt_refresh_token(encrypted_token):
     ).decode("utf-8")
 
 
+def youtube_credentials_for_token(refresh_token):
+    return Credentials(None, refresh_token=refresh_token,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=env("YOUTUBE_CLIENT_ID"),
+        client_secret=env("YOUTUBE_CLIENT_SECRET"), scopes=SCOPES)
+
+
 def youtube_service_for_user(user_id, channel_id):
     account = get_youtube_connection(user_id, channel_id)
     if not account:
         raise RuntimeError("Selected YouTube channel is not connected to this Telegram user")
     refresh_token = decrypt_refresh_token(account["refresh_token_enc"])
-    credentials = Credentials(
-        None, refresh_token=refresh_token,
-        token_uri="https://oauth2.googleapis.com/token",
-        client_id=env("YOUTUBE_CLIENT_ID"),
-        client_secret=env("YOUTUBE_CLIENT_SECRET"),
-        scopes=SCOPES,
-    )
-    return build("youtube", "v3", credentials=credentials, cache_discovery=False)
+    return build("youtube", "v3",
+        credentials=youtube_credentials_for_token(refresh_token),
+        cache_discovery=False)
 
 
 def youtube_upload_keyboard(accounts):
@@ -227,53 +231,84 @@ def comment_has_owner_reply(thread, channel_id):
     return any(((reply.get("snippet") or {}).get("authorChannelId") or {}).get("value") == channel_id
                for reply in replies)
 
-def list_recent_comments():
-    service = yt()
-    channel = service.channels().list(part="id,contentDetails", mine=True).execute()
+def list_recent_comments(service, channel_id):
+    channel = service.channels().list(part="contentDetails", id=channel_id).execute()
     items = channel.get("items", [])
     if not items:
-        raise RuntimeError("No YouTube channel found for this OAuth account")
-    channel_id = items[0]["id"]
-    if env("YOUTUBE_CHANNEL_ID") and channel_id != env("YOUTUBE_CHANNEL_ID"):
-        raise RuntimeError("Connected YouTube channel does not match YOUTUBE_CHANNEL_ID")
+        raise RuntimeError("Connected YouTube channel could not be loaded")
     uploads = items[0]["contentDetails"]["relatedPlaylists"]["uploads"]
     playlist = service.playlistItems().list(part="snippet", playlistId=uploads, maxResults=10).execute()
     results = []
     for item in playlist.get("items", []):
-        sn = item["snippet"]; video_id = sn["resourceId"]["videoId"]
+        sn = item["snippet"]
+        video_id = sn["resourceId"]["videoId"]
         try:
             threads = service.commentThreads().list(part="snippet,replies", videoId=video_id,
-                maxResults=50, order="time", textFormat="plainText").execute()
+                maxResults=100, order="time", textFormat="plainText").execute()
         except HttpError as exc:
-            if getattr(exc.resp,"status",None) in (403,404): continue
+            if getattr(exc.resp, "status", None) in (403, 404):
+                continue
             raise
         for thread in threads.get("items", []):
-            if comment_has_owner_reply(thread, channel_id): continue
-            top = thread["snippet"]["topLevelComment"]; c = top["snippet"]
-            results.append({"id":top["id"],"video_id":video_id,"title":sn.get("title",""),
-                            "text":c.get("textOriginal",c.get("textDisplay",""))})
+            if comment_has_owner_reply(thread, channel_id):
+                continue
+            top = thread["snippet"]["topLevelComment"]
+            c = top["snippet"]
+            results.append({"id": top["id"], "video_id": video_id,
+                "title": sn.get("title", ""),
+                "text": c.get("textOriginal", c.get("textDisplay", ""))})
     return results
 
-def auto_reply_scan():
+
+def auto_reply_scan_for_service(service, channel_id):
     count = 0
-    for comment in list_recent_comments():
+    for comment in list_recent_comments(service, channel_id):
         cid = comment["id"]
         if cid in DONE or not should_auto_reply(comment["text"]):
             continue
         reply = ai_reply(comment["text"], comment["title"])
-        yt().comments().insert(part="snippet",
-            body={"snippet":{"parentId":cid,"textOriginal":reply}}).execute()
-        DONE.add(cid); count += 1
-        log.info("Auto-replied to comment %s", cid)
+        service.comments().insert(part="snippet",
+            body={"snippet": {"parentId": cid, "textOriginal": reply}}).execute()
+        DONE.add(cid)
+        count += 1
+        log.info("Auto-replied to YouTube comment %s on channel %s", cid, channel_id)
     return count
 
+
+def auto_reply_scan():
+    service = yt()
+    channels = service.channels().list(part="id", mine=True).execute().get("items", [])
+    if not channels:
+        raise RuntimeError("No YouTube channel found for legacy owner OAuth")
+    return auto_reply_scan_for_service(service, channels[0]["id"])
+
+
+def scan_all_connected_channels():
+    total = 0
+    for account in list_all_youtube_connections():
+        try:
+            token = decrypt_refresh_token(account["refresh_token_enc"])
+            service = build("youtube", "v3",
+                credentials=youtube_credentials_for_token(token), cache_discovery=False)
+            total += auto_reply_scan_for_service(service, account["channel_id"])
+        except Exception:
+            log.exception("Comment scan failed for connected channel %s", account.get("channel_id"))
+    return total
+
+
 def auto_comment_worker():
-    interval = max(300, int(env("COMMENT_POLL_SECONDS","900")))
+    interval = comment_poll_interval(env("COMMENT_POLL_SECONDS", "120"))
     while True:
         try:
-            if env("AUTO_REPLY_MODE","automatic").lower() == "automatic" and env("YOUTUBE_REFRESH_TOKEN"):
-                count = auto_reply_scan()
-                if count: log.info("Automatic replies posted: %s",count)
+            if env("AUTO_REPLY_MODE", "automatic").lower() == "automatic":
+                try:
+                    count = scan_all_connected_channels()
+                    if count:
+                        log.info("Automatic replies posted across connected channels: %s", count)
+                except Exception:
+                    log.exception("Per-user connected-channel scan unavailable")
+                    if env("YOUTUBE_REFRESH_TOKEN"):
+                        auto_reply_scan()
         except Exception:
             log.exception("Automatic comment scan failed")
         time.sleep(interval)
