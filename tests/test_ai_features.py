@@ -34,7 +34,7 @@ class AIFeatureTests(unittest.TestCase):
 
         self.assertEqual(result["candidates"][0]["content"]["parts"][0]["text"], "ok")
         self.assertEqual(post.call_count, 2)
-        sleep.assert_called_once_with(1)
+        sleep.assert_called_once_with(2)
 
     @patch("ai_utils.time.sleep")
     @patch("ai_utils.requests.post")
