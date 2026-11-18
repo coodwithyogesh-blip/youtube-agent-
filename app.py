@@ -177,9 +177,9 @@ def upload_telegram_pair(chat_id):
         return
     item["busy"] = True
     try:
-        send_tg(chat_id, "🎬 Video aur thumbnail mil gaye. AI video analyse karke title, description, tags aur hashtags bana raha hai…")
+        send_tg(chat_id, "⏳ Gemini ko video aur thumbnail bhej raha hoon. Ismein thoda samay lag sakta hai…")
         metadata = generate_video_metadata(env("GEMINI_API_KEY"),
-            env("GEMINI_MODEL","gemini-3.8-flash"), item["video"], item.get("filename","video.mp4"),
+            env("GEMINI_MODEL","gemini-2.5-flash"), item["video"], item.get("filename","video.mp4"),
             item.get("caption",""), thumbnail_path=item["thumbnail"])
         body = build_video_metadata(metadata["title"], metadata["description"],
                                     json.dumps(metadata["tags"]), "public", None)
@@ -230,7 +230,8 @@ def receive_media(message, chat_id, user_id):
     else:
         return False
     if item.get("video") and item.get("thumbnail"):
-        upload_telegram_pair(chat_id)
+        # Run slow Gemini processing outside the Telegram webhook request.
+        threading.Thread(target=upload_telegram_pair, args=(chat_id,), daemon=True).start()
     return True
 
 def remove_social_media(chat_id):
