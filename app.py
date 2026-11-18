@@ -22,6 +22,9 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = int(os.getenv("MAX_UPLOAD_MB", "90")) * 1024 * 1024
 SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl", "https://www.googleapis.com/auth/youtube.upload", "https://www.googleapis.com/auth/yt-analytics.readonly"]
 DONE = set()
+# Telegram may retry a webhook update while a slow AI/video upload is running.
+# Remember update IDs before processing so duplicate media updates are ignored.
+DONE_TELEGRAM_UPDATES = set()
 LAST_COMMENT_SCAN = {}
 OAUTH_STATES = set()
 MEDIA = {}
@@ -1020,6 +1023,15 @@ def telegram_webhook():
         return jsonify(error="unauthorized"),401
     update=request.get_json(silent=True) or {}
     if not isinstance(update,dict) or "update_id" not in update: return jsonify(error="invalid update"),400
+    update_id = update.get("update_id")
+    # Telegram retries when a webhook takes too long. Do not process the same
+    # photo/video twice after the first run has already consumed its MEDIA state.
+    if update_id in DONE_TELEGRAM_UPDATES:
+        return jsonify(ok=True, duplicate=True)
+    DONE_TELEGRAM_UPDATES.add(update_id)
+    if len(DONE_TELEGRAM_UPDATES) > 5000:
+        DONE_TELEGRAM_UPDATES.clear()
+        DONE_TELEGRAM_UPDATES.add(update_id)
     try: process_update(update)
     except Exception: log.exception("Telegram update failed")
     return jsonify(ok=True)
