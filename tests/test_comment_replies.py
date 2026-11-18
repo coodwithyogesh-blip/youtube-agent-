@@ -53,11 +53,9 @@ class CommentReplyRetryTests(unittest.TestCase):
         self.assertNotIn("COMMENT_RETRY_1", agent.DONE)
         self.assertNotIn(self.channel_id, agent.LAST_COMMENT_SCAN)
 
-    @patch("app.datetime")
-    def test_first_scan_includes_unanswered_comments_from_previous_days(self, mock_datetime):
+    def test_first_scan_includes_unanswered_comments_from_previous_days(self):
         from datetime import datetime, timezone, timedelta
-        now = datetime(2026, 11, 18, 12, 0, tzinfo=timezone.utc)
-        mock_datetime.now.return_value = now
+        now = datetime.now(timezone.utc)
         old_comment = {
             "id": "OLD_COMMENT_2D",
             "snippet": {"topLevelComment": {"id": "OLD_COMMENT_2D", "snippet": {
