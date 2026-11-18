@@ -35,7 +35,7 @@ Set these in Render Environment:
 - `AUTO_REPLY_MODE=automatic`
 
 ## OAuth
-This app requests `youtube.force-ssl`, `youtube.upload`, and `yt-analytics.readonly`. After deploying, reconnect each Telegram YouTube account so the new Analytics permission is granted. Enable the YouTube Analytics API in the same Google Cloud project. The SEO report shows channel totals, a 28-day views/watch-time/subscriber trend graph, and metadata-completeness scores across all videos returned by the channel's uploads playlist. Add exact redirect URI `https://YOUR-RENDER-HOST/oauth/callback` in Google Cloud OAuth settings. Never share the refresh token.
+This app requests `youtube.force-ssl`, `youtube.upload`, and `yt-analytics.readonly`. After deploying, reconnect each Telegram YouTube account so the new Analytics permission is granted. Enable the YouTube Analytics API in the same Google Cloud project. The SEO report shows channel totals, a 28-day views/watch-time/subscriber trend graph, a score-distribution graph (poor/fair/good/excellent), and all weak videos below 80/100. Each weak video has its own Review & Fix button. Gemini prepares a title/description/tags preview using only the existing metadata; nothing changes on YouTube until the owner presses Confirm & Update for that specific video. Preview confirmations expire after 15 minutes, and changed source metadata invalidates the preview. Thumbnail design is not auto-edited. Metadata completeness is not a ranking guarantee. Add exact redirect URI `https://YOUR-RENDER-HOST/oauth/callback` in Google Cloud OAuth settings. Never share the refresh token.
 
 ## Render
 - Build: `pip install -r requirements.txt`
