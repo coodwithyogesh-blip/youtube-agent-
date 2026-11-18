@@ -43,14 +43,9 @@ def make_youtube_oauth_state(user_id):
 
 def read_youtube_oauth_state(value):
     try:
-        data = youtube_oauth_state_serializer().loads(value, max_age=600)
+        return youtube_oauth_state_serializer().loads(value, max_age=600)
     except (BadSignature, SignatureExpired):
         return None
-    nonce = data.get("nonce")
-    if not nonce or nonce not in OAUTH_STATES:
-        return None
-    OAUTH_STATES.discard(nonce)
-    return data
 
 
 def encrypt_refresh_token(token):
@@ -431,13 +426,9 @@ def telegram_webhook():
 @app.get("/oauth/youtube/start")
 def youtube_multi_oauth_start():
     state = request.args.get("state", "")
-    try:
-        data = youtube_oauth_state_serializer().loads(state, max_age=600)
-    except (BadSignature, SignatureExpired):
+    data = read_youtube_oauth_state(state)
+    if not data:
         return "Invalid or expired YouTube connection link. Telegram mein dobara Connect YouTube dabao.", 400
-    nonce = data.get("nonce")
-    if not nonce or nonce not in OAUTH_STATES:
-        return "This YouTube connection link was already used. Telegram mein dobara connect karo.", 400
     client_id, client_secret = env("YOUTUBE_CLIENT_ID"), env("YOUTUBE_CLIENT_SECRET")
     base = env("RENDER_EXTERNAL_URL").rstrip("/")
     if not client_id or not client_secret or not base:
