@@ -300,7 +300,7 @@ def scan_all_connected_channels():
 
 
 def auto_comment_worker():
-    interval = comment_poll_interval(env("COMMENT_POLL_SECONDS", "120"))
+    interval = 120  # Fixed two-minute scan cadence requested for the bot
     while True:
         try:
             if env("AUTO_REPLY_MODE", "automatic").lower() == "automatic":
