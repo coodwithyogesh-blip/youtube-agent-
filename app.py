@@ -229,26 +229,26 @@ def main_menu_keyboard():
 
 def main_menu_text(first_name=""):
     greeting = f" {first_name}" if first_name else ""
-    return ("👋 Welcome" + greeting + " to Social Media Agent!\\n\\n"
+    return ("👋 Welcome" + greeting + " to Social Media Agent!\n\n"
             "Apna platform choose karo. Account connections aur per-user automation "
             "abhi development mein hain; koi account bina authorization access nahi hoga.")
 
 
 def callback_response(data):
     messages = {
-        "platform_youtube": ("▶️ YouTube\\n\\nAbhi existing YouTube upload feature owner ke "
+        "platform_youtube": ("▶️ YouTube\n\nAbhi existing YouTube upload feature owner ke "
             "configured channel par kaam karta hai. Har user ka alag YouTube OAuth connection "
             "abhi ready nahi hai."),
-        "platform_instagram": ("📸 Instagram\\n\\nInstagram account connection abhi available "
+        "platform_instagram": ("📸 Instagram\n\nInstagram account connection abhi available "
             "nahi hai. Secure official login/API integration next step mein banegi."),
-        "platform_facebook": ("📘 Facebook\\n\\nFacebook account connection abhi available "
+        "platform_facebook": ("📘 Facebook\n\nFacebook account connection abhi available "
             "nahi hai. Secure official login/API integration next step mein banegi."),
-        "platform_snapchat": ("👻 Snapchat\\n\\nSnapchat account connection abhi available "
+        "platform_snapchat": ("👻 Snapchat\n\nSnapchat account connection abhi available "
             "nahi hai. Platform access/approval requirements check karne honge."),
-        "comments": ("💬 Comment Replies\\n\\nAI/Manual reply selection abhi per-user "
+        "comments": ("💬 Comment Replies\n\nAI/Manual reply selection abhi per-user "
             "workflow mein active nahi hai. Current automatic YouTube replies legacy owner "
             "configuration use karte hain."),
-        "settings": ("⚙️ Settings\\n\\nTumhari registration aur default settings Google "
+        "settings": ("⚙️ Settings\n\nTumhari registration aur default settings Google "
             "Sheets mein save hoti hain. Per-user reply mode aur polling controls abhi "
             "implement nahi hue hain."),
     }
@@ -288,7 +288,7 @@ def process_update(update):
         try:
             register_user(user_id, chat_id, user.get("username", ""), user.get("first_name", ""))
             tg("sendMessage", {"chat_id": chat_id,
-                "text": main_menu_text(user.get("first_name", "")) + "\\n\\n✅ Telegram account Google Sheets mein registered.",
+                "text": main_menu_text(user.get("first_name", "")) + "\n\n✅ Telegram account Google Sheets mein registered.",
                 "reply_markup": main_menu_keyboard()})
         except Exception:
             log.exception("Google Sheets user registration failed")
