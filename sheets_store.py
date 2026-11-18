@@ -248,3 +248,23 @@ def list_social_drafts(user_id, limit=5):
                 "hashtags": row[4], "created_at": row[5], "status": row[6],
             })
     return items[-max(1, min(int(limit), 20)):][::-1]
+
+
+def list_all_youtube_connections():
+    """Internal worker view of connected channels; tokens remain encrypted at rest."""
+    with _LOCK:
+        _ensure_tabs()
+        rows = _api().spreadsheets().values().get(
+            spreadsheetId=_sheet_id(), range="'Accounts'!A:H"
+        ).execute().get("values", [])
+    accounts = []
+    for row in rows[1:]:
+        if (len(row) >= 8 and row[1] == "youtube"
+                and row[3] == "connected" and row[6] and row[7]):
+            accounts.append({
+                "telegram_user_id": str(row[0]),
+                "account_name": row[2],
+                "channel_id": row[6],
+                "refresh_token_enc": row[7],
+            })
+    return accounts
