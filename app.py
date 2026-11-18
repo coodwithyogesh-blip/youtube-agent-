@@ -385,8 +385,9 @@ def auto_reply_scan():
         service, channels[0]["id"], telegram_user_id=env("TELEGRAM_OWNER_ID"))
 
 
-def scan_all_connected_channels():
+def scan_all_connected_channels(raise_errors=False):
     total = 0
+    failures = []
     accounts = list_all_youtube_connections()
     if not accounts and env("YOUTUBE_REFRESH_TOKEN"):
         return auto_reply_scan()
@@ -398,8 +399,11 @@ def scan_all_connected_channels():
             total += auto_reply_scan_for_service(
                 service, account["channel_id"],
                 telegram_user_id=account.get("telegram_user_id") or env("TELEGRAM_OWNER_ID"))
-        except Exception:
+        except Exception as exc:
             log.exception("Comment scan failed for connected channel %s", account.get("channel_id"))
+            failures.append(str(exc)[:180])
+    if raise_errors and failures:
+        raise RuntimeError("Comment scan failed: " + " | ".join(failures))
     return total
 
 
@@ -991,8 +995,18 @@ def process_update(update):
             "\nAuto replies: "+env("AUTO_REPLY_MODE","automatic"))
         return
     if text.startswith("/comments"):
-        try: send_tg(chat_id,f"✅ Auto replies posted across connected channels: {scan_all_connected_channels()}")
-        except Exception as exc: send_tg(chat_id,"❌ "+str(exc)[:500])
+        try:
+            # Manual scan deliberately resets the cursor so comments from the
+            # last 24 hours are reconsidered, including comments missed by a
+            # previous cursor position. Successfully replied threads are
+            # filtered by YouTube's existing owner-reply check.
+            LAST_COMMENT_SCAN.clear()
+            count = scan_all_connected_channels(raise_errors=True)
+            send_tg(chat_id, f"✅ Manual 24-hour comment rescan complete. New replies posted: {count}")
+            if count == 0:
+                send_tg(chat_id, "ℹ️ Is scan mein koi eligible unanswered comment nahi mila. Agar Gemini 429/API error hua, uska error ab alag se dikhaya jayega.")
+        except Exception as exc:
+            send_tg(chat_id, "❌ Comment scan/retry failed: " + str(exc)[:500])
         return
 
 @app.get("/")
