@@ -1,6 +1,6 @@
 import unittest
 
-from youtube_insights import comment_poll_interval, score_video_seo
+from youtube_insights import comment_poll_interval, score_video_seo, weak_seo_videos, seo_score_distribution
 
 
 class YouTubeInsightsTests(unittest.TestCase):
@@ -29,6 +29,18 @@ class YouTubeInsightsTests(unittest.TestCase):
         self.assertLess(result["score"], 50)
         self.assertFalse(result["checks"]["title"])
         self.assertFalse(result["checks"]["description"])
+
+
+    def test_weak_seo_videos_returns_every_video_below_threshold(self):
+        videos = [{"id": "a", "score": 45}, {"id": "b", "score": 90},
+                  {"id": "c", "score": 70}]
+        self.assertEqual([v["id"] for v in weak_seo_videos(videos)], ["a", "c"])
+
+    def test_seo_score_distribution_counts_all_bands(self):
+        videos = [{"score": 20}, {"score": 55}, {"score": 65},
+                  {"score": 85}, {"score": 100}]
+        self.assertEqual(seo_score_distribution(videos),
+                         {"poor": 1, "fair": 2, "good": 1, "excellent": 1})
 
 
 if __name__ == "__main__":
