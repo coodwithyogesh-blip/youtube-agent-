@@ -9,7 +9,7 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 from upload_utils import parse_publish_at, build_video_metadata
 from ai_utils import generate_video_metadata, should_auto_reply, generate_content_with_fallback
-from sheets_store import register_user, save_youtube_connection, list_youtube_connections
+from sheets_store import (register_user, save_youtube_connection, list_youtube_connections,\n                          get_youtube_connection)
 from cryptography.fernet import Fernet
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
@@ -53,6 +53,42 @@ def encrypt_refresh_token(token):
     if not key:
         raise RuntimeError("TOKEN_ENCRYPTION_KEY is not configured")
     return Fernet(key.encode("utf-8")).encrypt(token.encode("utf-8")).decode("utf-8")
+
+def decrypt_refresh_token(encrypted_token):
+    key = env("TOKEN_ENCRYPTION_KEY")
+    if not key:
+        raise RuntimeError("TOKEN_ENCRYPTION_KEY is not configured")
+    return Fernet(key.encode("utf-8")).decrypt(
+        encrypted_token.encode("utf-8")
+    ).decode("utf-8")
+
+
+def youtube_service_for_user(user_id, channel_id):
+    account = get_youtube_connection(user_id, channel_id)
+    if not account:
+        raise RuntimeError("Selected YouTube channel is not connected to this Telegram user")
+    refresh_token = decrypt_refresh_token(account["refresh_token_enc"])
+    credentials = Credentials(
+        None, refresh_token=refresh_token,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=env("YOUTUBE_CLIENT_ID"),
+        client_secret=env("YOUTUBE_CLIENT_SECRET"),
+        scopes=SCOPES,
+    )
+    return build("youtube", "v3", credentials=credentials, cache_discovery=False)
+
+
+def youtube_upload_keyboard(accounts):
+    rows = []
+    for account in accounts:
+        channel_id = str(account.get("channel_id") or "")
+        if channel_id:
+            name = str(account.get("account_name") or "YouTube channel")[:35]
+            rows.append([{"text": "▶️ " + name, "callback_data": "ytselect:" + channel_id}])
+    rows.append([{"text": "🔗 Connect another YouTube", "callback_data": "platform_youtube"}])
+    rows.append([{"text": "⬅️ Main Menu", "callback_data": "menu"}])
+    return {"inline_keyboard": rows}
+
 
 def telegram_html(value):
     return html.escape(str(value or ""), quote=False)
@@ -136,11 +172,11 @@ def upload_telegram_pair(chat_id):
                                     json.dumps(metadata["tags"]), "public", None)
         media = MediaFileUpload(item["video"], chunksize=8*1024*1024,
                                 resumable=True, mimetype=item.get("mime","video/mp4"))
-        result = yt().videos().insert(part="snippet,status", body=body, media_body=media).execute()
+        service = youtube_service_for_user(item["user_id"], item["selected_channel_id"])\n        result = service.videos().insert(part="snippet,status", body=body, media_body=media).execute()
         video_id = result["id"]
         if os.path.getsize(item["thumbnail"]) > 2*1024*1024:
             raise RuntimeError("Video upload ho gaya, lekin thumbnail 2 MB se bada hai. YouTube limit ke andar thumbnail bhejo.")
-        yt().thumbnails().set(videoId=video_id,
+        service.thumbnails().set(videoId=video_id,
             media_body=MediaFileUpload(item["thumbnail"], resumable=False,
                                        mimetype=item.get("thumb_mime","image/jpeg"))).execute()
         send_tg(chat_id, "✅ YouTube par upload ho gaya!\n\n"
@@ -316,11 +352,37 @@ def process_update(update):
                     tg("sendMessage", {"chat_id": chat_id,
                         "text": format_youtube_accounts(accounts),
                         "reply_markup": {"inline_keyboard": [
-                            [{"text": "🔗 Connect YouTube", "callback_data": "platform_youtube"}],
+                            [{"text": "🔗 Connect YouTube", "callback_data": "platform_youtube"}],\n                            [{"text": "⬆️ Upload Video", "callback_data": "upload_video"}],
                             [{"text": "⬅️ Main Menu", "callback_data": "menu"}]]}})
                 except Exception:
                     log.exception("Could not load connected accounts")
                     send_tg(chat_id, "❌ Accounts load nahi ho paaye. Google Sheet connection check karo.")
+            elif data == "upload_video":
+                try:
+                    accounts = list_youtube_connections(query.get("from", {}).get("id"))
+                    if not accounts:
+                        send_tg(chat_id, "Pehle YouTube account connect karo.")
+                    else:
+                        tg("sendMessage", {"chat_id": chat_id,
+                            "text": "Upload kis YouTube channel par karna hai? Channel select karo:",
+                            "reply_markup": youtube_upload_keyboard(accounts)})
+                except Exception:
+                    log.exception("Could not prepare YouTube upload")
+                    send_tg(chat_id, "❌ Connected channels load nahi ho paaye.")
+            elif data.startswith("ytselect:"):
+                channel_id = data.split(":", 1)[1]
+                try:
+                    accounts = list_youtube_connections(query.get("from", {}).get("id"))
+                    selected = next((x for x in accounts if x.get("channel_id") == channel_id), None)
+                    if not selected:
+                        raise RuntimeError("Ye channel tumhare Telegram account se connected nahi hai.")
+                    item = MEDIA.setdefault(str(chat_id), {})
+                    item["user_id"] = str(query.get("from", {}).get("id"))
+                    item["selected_channel_id"] = channel_id
+                    send_tg(chat_id, "✅ Selected: " + selected.get("account_name", "YouTube channel")
+                        + "\\nAb video bhejo, phir uska thumbnail photo bhejo.")
+                except Exception as exc:
+                    send_tg(chat_id, "❌ " + str(exc)[:250])
             elif data == "platform_youtube":
                 try:
                     state = make_youtube_oauth_state(query.get("from", {}).get("id"))
