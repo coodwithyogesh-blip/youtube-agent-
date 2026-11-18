@@ -10,7 +10,8 @@ from googleapiclient.http import MediaFileUpload
 from upload_utils import parse_publish_at, build_video_metadata
 from ai_utils import (generate_video_metadata, should_auto_reply, generate_content_with_fallback, clean_generated_metadata)
 from sheets_store import (register_user, save_youtube_connection, list_youtube_connections,
-                          get_youtube_connection, list_all_youtube_connections)
+                          get_youtube_connection, list_all_youtube_connections,
+                          claim_comment_reply, mark_comment_reply)
 from youtube_insights import (comment_poll_interval, score_video_seo, weak_seo_videos, seo_score_distribution)
 from social_drafts import build_social_draft
 from cryptography.fernet import Fernet
@@ -22,6 +23,7 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = int(os.getenv("MAX_UPLOAD_MB", "90")) * 1024 * 1024
 SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl", "https://www.googleapis.com/auth/youtube.upload", "https://www.googleapis.com/auth/yt-analytics.readonly"]
 DONE = set()
+COMMENT_SCAN_LOCK = threading.Lock()
 COMMENT_PENDING_COUNTS = {}  # in-memory counts only; never stores comment text
 # Telegram may retry a webhook update while a slow AI/video upload is running.
 # Remember update IDs before processing so duplicate media updates are ignored.
@@ -332,46 +334,68 @@ def list_recent_comments(service, channel_id):
     return results
 
 def auto_reply_scan_for_service(service, channel_id, telegram_user_id=None):
-    count = 0
-    failed_ids = []
-    notification_chat_id = telegram_user_id or env("TELEGRAM_OWNER_ID")
-    comments = list_recent_comments(service, channel_id)
-    for comment in comments:
-        cid = comment["id"]
-        if cid in DONE or not should_auto_reply(comment["text"]):
-            continue
-        try:
-            reply = ai_reply(comment["text"], comment["title"])
-            service.comments().insert(part="snippet",
-                body={"snippet": {"parentId": cid, "textOriginal": reply}}).execute()
-        except Exception:
-            # Keep this comment pending, but do not let one Gemini quota error
-            # block other eligible comments in the same channel scan.
-            failed_ids.append(cid)
-            log.exception("Comment %s remains pending; it will be retried on the next scan", cid)
-            continue
-
-        # Mark complete only after YouTube confirms that the reply was posted.
-        DONE.add(cid)
-        count += 1
-        log.info("Auto-replied to YouTube comment %s on channel %s", cid, channel_id)
-        if notification_chat_id:
+    # Prevent the automatic worker and /comments command from overlapping.
+    if not COMMENT_SCAN_LOCK.acquire(blocking=False):
+        log.info("Comment scan already running; skipping overlapping scan")
+        return 0
+    try:
+        count = 0
+        failed_ids = []
+        notification_chat_id = telegram_user_id or env("TELEGRAM_OWNER_ID")
+        comments = list_recent_comments(service, channel_id)
+        for comment in comments:
+            cid = comment["id"]
+            if cid in DONE or not should_auto_reply(comment["text"]):
+                continue
+            # Durable claim prevents repeats after process restarts. Claims older
+            # than 15 minutes can be recovered after a crashed worker.
             try:
-                send_tg(notification_chat_id,
-                    "✅ Replied to your comment successfully!\n"
-                    "Channel: " + str(channel_id) + "\n"
-                    "Comment: " + str(comment["text"])[:180])
+                if not claim_comment_reply(channel_id, cid):
+                    continue
             except Exception:
-                log.exception("Telegram success notification failed for comment %s", cid)
+                failed_ids.append(cid)
+                log.exception("Could not claim comment %s; skipping to avoid duplicate reply", cid)
+                continue
+            try:
+                reply = ai_reply(comment["text"], comment["title"])
+                service.comments().insert(part="snippet",
+                    body={"snippet": {"parentId": cid, "textOriginal": reply}}).execute()
+            except Exception:
+                failed_ids.append(cid)
+                try:
+                    mark_comment_reply(channel_id, cid, "pending")
+                except Exception:
+                    log.exception("Could not release pending ledger claim for comment %s", cid)
+                log.exception("Comment %s remains pending; it will be retried on the next scan", cid)
+                continue
 
-    # Store only a count, never comment/reply text. Every scan fetches all pages,
-    # so failed comments remain eligible for retry without a Sheets write.
-    COMMENT_PENDING_COUNTS[channel_id] = len(failed_ids)
-    if failed_ids:
-        log.warning("%s YouTube comments remain pending for channel %s",
-                    len(failed_ids), channel_id)
-    LAST_COMMENT_SCAN[channel_id] = datetime.now(timezone.utc)
-    return count
+            # YouTube accepted the reply. Persist that fact before notifying Telegram.
+            DONE.add(cid)
+            count += 1
+            try:
+                mark_comment_reply(channel_id, cid, "replied")
+            except Exception:
+                # On the next scan YouTube's own thread reply check is a second
+                # line of defense if this ledger write fails.
+                log.exception("Could not persist replied state for comment %s", cid)
+            log.info("Auto-replied to YouTube comment %s on channel %s", cid, channel_id)
+            if notification_chat_id:
+                try:
+                    send_tg(notification_chat_id,
+                        "✅ Replied to your comment successfully!\\n"
+                        "Channel: " + str(channel_id) + "\\n"
+                        "Comment: " + str(comment["text"])[:180])
+                except Exception:
+                    log.exception("Telegram success notification failed for comment %s", cid)
+
+        COMMENT_PENDING_COUNTS[channel_id] = len(failed_ids)
+        if failed_ids:
+            log.warning("%s YouTube comments remain pending for channel %s",
+                        len(failed_ids), channel_id)
+        LAST_COMMENT_SCAN[channel_id] = datetime.now(timezone.utc)
+        return count
+    finally:
+        COMMENT_SCAN_LOCK.release()
 
 def auto_reply_scan():
     service = yt()
