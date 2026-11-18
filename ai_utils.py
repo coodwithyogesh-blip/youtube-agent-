@@ -10,7 +10,7 @@ RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
 
 
 def generate_content_with_fallback(api_key, model, payload, timeout=60,
-                                  fallback_model=None, max_attempts=3):
+                                  fallback_model=None, max_attempts=4):
     """Call Gemini GenerateContent with bounded retries and one model fallback.
 
     Transient HTTP/network failures use exponential backoff. A fallback model is
@@ -45,7 +45,7 @@ def generate_content_with_fallback(api_key, model, payload, timeout=60,
                             "Check API key permissions, quota, and request settings."
                         )
                     if attempt + 1 < max_attempts and status in RETRYABLE_STATUS_CODES:
-                        time.sleep(min(2 ** attempt, 8))
+                        time.sleep(min(2 ** (attempt + 1), 16))
                         continue
                     break
                 return response.json()
@@ -62,7 +62,7 @@ def generate_content_with_fallback(api_key, model, payload, timeout=60,
                 else:
                     last_network_error = type(exc).__name__
                 if attempt + 1 < max_attempts and (status is None or status in RETRYABLE_STATUS_CODES):
-                    time.sleep(min(2 ** attempt, 8))
+                    time.sleep(min(2 ** (attempt + 1), 16))
                     continue
                 break
         # Try the fallback only after transient failure or model-not-found.
@@ -183,7 +183,8 @@ def generate_video_metadata(api_key, model, video_path, filename, caption="", pl
             api_key, model,
             {"contents": [{"parts": parts}],
              "generationConfig": {"temperature": 0.35, "responseMimeType": "application/json"}},
-            timeout=120, fallback_model=os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash"))
+            timeout=120, fallback_model=os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash-lite"),
+            max_attempts=4)
         text = generated["candidates"][0]["content"]["parts"][0]["text"]
         return clean_generated_metadata(json.loads(text))
     finally:
