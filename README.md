@@ -35,7 +35,7 @@ Set these in Render Environment:
 - `AUTO_REPLY_MODE=automatic`
 
 ## OAuth
-This app requests `youtube.force-ssl`, `youtube.upload`, and `yt-analytics.readonly`. After deploying, reconnect each Telegram YouTube account so the new Analytics permission is granted. Enable the YouTube Analytics API in the same Google Cloud project. The SEO report shows channel totals, a 28-day views/watch-time/subscriber trend graph, and metadata-completeness scores for up to 50 recent videos. Add exact redirect URI `https://YOUR-RENDER-HOST/oauth/callback` in Google Cloud OAuth settings. Never share the refresh token.
+This app requests `youtube.force-ssl`, `youtube.upload`, and `yt-analytics.readonly`. After deploying, reconnect each Telegram YouTube account so the new Analytics permission is granted. Enable the YouTube Analytics API in the same Google Cloud project. The SEO report shows channel totals, a 28-day views/watch-time/subscriber trend graph, and metadata-completeness scores across all videos returned by the channel's uploads playlist. Add exact redirect URI `https://YOUR-RENDER-HOST/oauth/callback` in Google Cloud OAuth settings. Never share the refresh token.
 
 ## Render
 - Build: `pip install -r requirements.txt`
