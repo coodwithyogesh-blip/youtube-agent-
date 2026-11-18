@@ -5,7 +5,7 @@ from cryptography.fernet import Fernet
 
 from app import (callback_response, main_menu_keyboard, main_menu_text, format_youtube_accounts,
                  make_youtube_oauth_state, read_youtube_oauth_state,
-                 encrypt_refresh_token, OAUTH_STATES)
+                 encrypt_refresh_token, OAUTH_STATES, youtube_upload_keyboard)
 
 
 class TelegramMenuTests(unittest.TestCase):
@@ -14,13 +14,23 @@ class TelegramMenuTests(unittest.TestCase):
         callbacks = {button["callback_data"] for row in rows for button in row}
         self.assertEqual(callbacks, {
             "platform_youtube", "platform_instagram", "platform_facebook",
-            "platform_snapchat", "comments", "settings", "my_accounts",
+            "platform_snapchat", "comments", "settings", "my_accounts", "upload_video",
         })
 
     def test_my_accounts_formats_connected_channels_for_telegram(self):
         message = format_youtube_accounts([{"account_name": "My Channel", "channel_id": "UC123"}])
         self.assertIn("My Channel", message)
         self.assertIn("UC123", message)
+
+    def test_upload_keyboard_targets_each_connected_channel(self):
+        keyboard = youtube_upload_keyboard([
+            {"account_name": "Channel One", "channel_id": "UC111"},
+            {"account_name": "Channel Two", "channel_id": "UC222"},
+        ])
+        buttons = [b for row in keyboard["inline_keyboard"] for b in row]
+        self.assertEqual([b["callback_data"] for b in buttons], [
+            "ytselect:UC111", "ytselect:UC222"
+        ])
 
     def test_my_accounts_shows_clear_empty_state(self):
         self.assertIn("Abhi connected nahi", format_youtube_accounts([]))
