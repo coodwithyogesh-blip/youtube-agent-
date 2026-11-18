@@ -697,7 +697,7 @@ def process_update(update):
             "\nAuto replies: "+env("AUTO_REPLY_MODE","automatic"))
         return
     if text.startswith("/comments"):
-        try: send_tg(chat_id,f"✅ Auto replies posted: {auto_reply_scan()}")
+        try: send_tg(chat_id,f"✅ Auto replies posted across connected channels: {scan_all_connected_channels()}")
         except Exception as exc: send_tg(chat_id,"❌ "+str(exc)[:500])
         return
 
