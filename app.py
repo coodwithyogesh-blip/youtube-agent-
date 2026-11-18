@@ -285,7 +285,10 @@ def auto_reply_scan():
 
 def scan_all_connected_channels():
     total = 0
-    for account in list_all_youtube_connections():
+    accounts = list_all_youtube_connections()
+    if not accounts and env("YOUTUBE_REFRESH_TOKEN"):
+        return auto_reply_scan()
+    for account in accounts:
         try:
             token = decrypt_refresh_token(account["refresh_token_enc"])
             service = build("youtube", "v3",
