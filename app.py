@@ -435,6 +435,42 @@ def process_update(update):
         tg("sendMessage", {"chat_id": chat_id, "text": main_menu_text(user.get("first_name", "")),
             "reply_markup": main_menu_keyboard()})
         return
+    if text.startswith("/drafts"):
+        try:
+            drafts = list_social_drafts(user_id, 5)
+            if not drafts:
+                send_tg(chat_id, "Abhi koi saved social draft nahi hai. /draft instagram | topic bhejo.")
+            else:
+                lines = ["📝 Tumhare latest social drafts:"]
+                for index, draft in enumerate(drafts, 1):
+                    lines.append(
+                        f"\\n{index}. {draft['platform'].title()} — {draft['topic']}\\n"
+                        f"{draft['caption']}\\n{draft['hashtags']}"
+                    )
+                send_tg(chat_id, "\\n".join(lines)[:3900])
+        except Exception:
+            log.exception("Could not list social drafts")
+            send_tg(chat_id, "❌ Drafts load nahi hue. Google Sheets setup check karo.")
+        return
+    if text.startswith("/draft "):
+        try:
+            payload = text[len("/draft "):]
+            if "|" not in payload:
+                raise ValueError("Format: /draft instagram | apna topic")
+            platform, topic = payload.split("|", 1)
+            draft = build_social_draft(platform, topic)
+            save_social_draft(user_id, draft)
+            send_tg(chat_id,
+                "✅ Social draft Google Sheets mein save ho gaya.\\n"
+                f"Platform: {draft['platform'].title()}\\n\\n"
+                f"{draft['caption']}\\n\\n{draft['hashtags']}\\n\\n"
+                "Copy karke app par manually post karo. /drafts se saved drafts dekh sakte ho.")
+        except ValueError as exc:
+            send_tg(chat_id, "❌ " + str(exc))
+        except Exception:
+            log.exception("Could not save social draft")
+            send_tg(chat_id, "❌ Draft save nahi hua. Google Sheets access check karo.")
+        return
     if message.get("video") or message.get("photo") or message.get("document"):
         if chat.get("type") != "private":
             send_tg(chat_id, "Security ke liye upload private Telegram chat mein karo.")
