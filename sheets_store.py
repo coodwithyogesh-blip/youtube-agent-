@@ -122,10 +122,14 @@ def register_user(user_id, chat_id, username="", first_name=""):
         "first_name": first_name, "registered_at": now, "last_seen": now, "status": "registered"
     }
     _upsert("Users", "telegram_user_id", user_id, headers, record)
-    _upsert("Settings", "telegram_user_id", user_id, SCHEMAS["Settings"], {
-        "telegram_user_id": user_id, "reply_mode": "ai", "manual_reply_text": "",
-        "comment_poll_seconds": "240", "updated_at": now
-    })
+    with _LOCK:
+        _ensure_tabs()
+        existing = _api().spreadsheets().values().get(
+            spreadsheetId=_sheet_id(), range="'Settings'!A:A"
+        ).execute().get("values", [])
+        already_registered = any(row and str(row[0]) == str(user_id) for row in existing[1:])
+        if not already_registered:
+            _append("Settings", [user_id, "ai", "", "240", now])
     return True
 
 
