@@ -42,5 +42,23 @@ This app requests `youtube.force-ssl` and `youtube.upload`. After deploying, aut
 - Start: `gunicorn app:app --workers 1 --threads 8 --timeout 240`
 - Health check: `/healthz`
 
+## Google Sheets storage
+
+The app includes `sheets_store.py` for a shared Google Spreadsheet with per-Telegram-user rows. It creates these tabs on first successful registration: Users, Accounts, Settings, Upload_History, Comments, and Sessions.
+
+Configure these Render environment variables:
+- `GOOGLE_SHEET_ID`: the long spreadsheet ID from the Google Sheets URL.
+- `GOOGLE_SERVICE_ACCOUNT_JSON`: the complete service-account JSON key as one environment-variable value (never commit it to GitHub).
+
+Setup:
+1. Create a Google Cloud project and enable the Google Sheets API.
+2. Create a service account and generate a JSON key.
+3. Create a blank Google Sheet.
+4. Share that Sheet with the service-account email address as Editor.
+5. Add the two environment variables in Render and redeploy.
+6. Open the Telegram bot privately and send `/start`. The user should then appear in the Users tab.
+
+Important: this is the first storage/onboarding layer only. The existing YouTube upload and OAuth code still uses the legacy single-owner YouTube token. Public multi-user uploads and per-user social-account connections are not enabled yet; do not treat registration as account authorization. Passwords and raw browser cookies must never be stored in Sheets.
+
 ## Storage and limitations
 No SQLite or Supabase. Media files are temporary and removed after upload. Telegram media, duplicate tracking and OAuth state are held in process memory and reset on restart. Test with a private/test channel first; this configuration publishes Telegram submissions publicly. Never share tokens.
