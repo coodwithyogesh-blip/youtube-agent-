@@ -428,6 +428,87 @@ def telegram_webhook():
     except Exception: log.exception("Telegram update failed")
     return jsonify(ok=True)
 
+@app.get("/oauth/youtube/start")
+def youtube_multi_oauth_start():
+    state = request.args.get("state", "")
+    try:
+        data = youtube_oauth_state_serializer().loads(state, max_age=600)
+    except (BadSignature, SignatureExpired):
+        return "Invalid or expired YouTube connection link. Telegram mein dobara Connect YouTube dabao.", 400
+    nonce = data.get("nonce")
+    if not nonce or nonce not in OAUTH_STATES:
+        return "This YouTube connection link was already used. Telegram mein dobara connect karo.", 400
+    client_id, client_secret = env("YOUTUBE_CLIENT_ID"), env("YOUTUBE_CLIENT_SECRET")
+    base = env("RENDER_EXTERNAL_URL").rstrip("/")
+    if not client_id or not client_secret or not base:
+        return "Set YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET and RENDER_EXTERNAL_URL in Render.", 400
+    params = {
+        "client_id": client_id,
+        "redirect_uri": base + "/oauth/youtube/callback",
+        "response_type": "code",
+        "scope": " ".join(SCOPES),
+        "access_type": "offline",
+        "prompt": "consent",
+        "include_granted_scopes": "true",
+        "state": state,
+    }
+    return redirect("https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(params))
+
+
+@app.get("/oauth/youtube/callback")
+def youtube_multi_oauth_callback():
+    data = read_youtube_oauth_state(request.args.get("state", ""))
+    if not data:
+        return "Invalid, expired, or already-used OAuth state. Telegram mein dobara Connect YouTube dabao.", 400
+    if request.args.get("error"):
+        return "Google authorization cancelled: " + html.escape(request.args["error"]), 400
+    base = env("RENDER_EXTERNAL_URL").rstrip("/")
+    client_id, client_secret = env("YOUTUBE_CLIENT_ID"), env("YOUTUBE_CLIENT_SECRET")
+    if not client_id or not client_secret or not base:
+        return "Google OAuth settings missing in Render.", 400
+    response = requests.post("https://oauth2.googleapis.com/token", data={
+        "code": request.args.get("code", ""),
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "redirect_uri": base + "/oauth/youtube/callback",
+        "grant_type": "authorization_code",
+    }, timeout=30)
+    if response.status_code != 200:
+        log.error("Per-user YouTube token exchange failed: %s", response.text[:500])
+        return "Google token exchange failed. Check OAuth client and redirect URI, then retry.", 400
+    token_data = response.json()
+    refresh_token = token_data.get("refresh_token")
+    if not refresh_token:
+        return "Google did not return a refresh token. Remove this app from Google Account access and connect again.", 400
+    credentials = Credentials(
+        token=token_data.get("access_token"),
+        refresh_token=refresh_token,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=client_id,
+        client_secret=client_secret,
+        scopes=SCOPES,
+    )
+    try:
+        service = build("youtube", "v3", credentials=credentials, cache_discovery=False)
+        channel_response = service.channels().list(part="id,snippet", mine=True).execute()
+        channels = channel_response.get("items", [])
+        if not channels:
+            return "Is Google account par YouTube channel nahi mila.", 400
+        channel = channels[0]
+        channel_id = channel["id"]
+        channel_name = channel.get("snippet", {}).get("title", "YouTube channel")
+        encrypted = encrypt_refresh_token(refresh_token)
+        save_youtube_connection(data["user_id"], channel_name, channel_id, encrypted)
+    except Exception:
+        log.exception("Saving per-user YouTube connection failed")
+        return "YouTube channel verify/save nahi ho paya. Render logs aur Google Sheet permissions check karo.", 500
+    return ("<h2>YouTube connected successfully!</h2><p>Channel: "
+        + html.escape(channel_name) + "</p><p>Telegram User ID: "
+        + html.escape(str(data["user_id"]))
+        + "</p><p>Refresh token Google Sheets mein encrypted form mein save hua hai. "
+        "Abhi upload/comment workflows ko per-user token par switch karna next step hai.</p>")
+
+
 @app.get("/oauth/start")
 def oauth_start():
     client_id=env("YOUTUBE_CLIENT_ID"); base=env("RENDER_EXTERNAL_URL").rstrip("/")
