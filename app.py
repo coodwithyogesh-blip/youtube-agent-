@@ -291,6 +291,7 @@ def main_menu_keyboard():
     return {"inline_keyboard": [
         [{"text": "▶️ YouTube", "callback_data": "platform_youtube"},
          {"text": "👤 My Accounts", "callback_data": "my_accounts"}],
+        [{"text": "⬆️ Upload Video", "callback_data": "upload_video"}],
         [{"text": "📸 Instagram", "callback_data": "platform_instagram"},
          {"text": "📘 Facebook", "callback_data": "platform_facebook"}],
         [{"text": "👻 Snapchat", "callback_data": "platform_snapchat"},
