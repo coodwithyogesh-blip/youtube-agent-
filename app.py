@@ -179,7 +179,7 @@ def upload_telegram_pair(chat_id):
     try:
         send_tg(chat_id, "⏳ Gemini ko video aur thumbnail bhej raha hoon. Ismein thoda samay lag sakta hai…")
         metadata = generate_video_metadata(env("GEMINI_API_KEY"),
-            env("GEMINI_MODEL","gemini-2.5-flash"), item["video"], item.get("filename","video.mp4"),
+            env("GEMINI_MODEL","gemini-3.8-flash"), item["video"], item.get("filename","video.mp4"),
             item.get("caption",""), thumbnail_path=item["thumbnail"])
         body = build_video_metadata(metadata["title"], metadata["description"],
                                     json.dumps(metadata["tags"]), "public", None)
