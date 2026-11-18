@@ -302,10 +302,8 @@ def comment_has_owner_reply(thread, channel_id):
                for reply in replies)
 
 def list_recent_comments(service, channel_id):
-    now = datetime.now(timezone.utc)
-    # First scan after startup (and an explicit /comments reset) looks back
-    # seven days so older unanswered comments are not silently missed.
-    cutoff = LAST_COMMENT_SCAN.get(channel_id, now - timedelta(days=7)) - timedelta(minutes=3)
+    # Fetch every page from YouTube's channel comment threads. There is
+    # deliberately no date cutoff: old unanswered comments must be eligible too.
     results = []
     page_token = None
     while True:
@@ -315,27 +313,17 @@ def list_recent_comments(service, channel_id):
             maxResults=100, order="time", textFormat="plainText",
             pageToken=page_token
         ).execute()
-        stop = False
         for thread in response.get("items", []):
             top = thread["snippet"]["topLevelComment"]
             comment = top["snippet"]
             if ((comment.get("authorChannelId") or {}).get("value") == channel_id
                     or comment_has_owner_reply(thread, channel_id)):
                 continue
-            published = comment.get("publishedAt")
-            if published:
-                try:
-                    published_at = datetime.fromisoformat(published.replace("Z", "+00:00"))
-                    if published_at < cutoff:
-                        stop = True
-                        break
-                except ValueError:
-                    pass
             results.append({
                 "id": top["id"], "video_id": comment.get("videoId", ""),
                 "title": "", "text": comment.get("textOriginal", comment.get("textDisplay", "")),
             })
-        if stop or not response.get("nextPageToken"):
+        if not response.get("nextPageToken"):
             break
         page_token = response["nextPageToken"]
     # Do not advance the cursor here. The caller advances it only after every
