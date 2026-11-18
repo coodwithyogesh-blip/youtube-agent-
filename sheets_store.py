@@ -65,7 +65,8 @@ def _ensure_tabs():
         result = api.spreadsheets().values().get(
             spreadsheetId=sid, range=f"{_quote(name)}!1:1"
         ).execute()
-        if not result.get("values"):
+        current_headers = result.get("values", [[]])[0] if result.get("values") else []
+        if current_headers != headers:
             api.spreadsheets().values().update(
                 spreadsheetId=sid, range=f"{_quote(name)}!A1",
                 valueInputOption="RAW", body={"values": [headers]}
