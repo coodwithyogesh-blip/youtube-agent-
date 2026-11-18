@@ -16,7 +16,7 @@ class YouTubeInsightsTests(unittest.TestCase):
     def test_video_seo_score_rewards_complete_metadata(self):
         video = {
             "title": "Free Fire ranked gameplay tips",
-            "description": "Watch this gameplay and subscribe for more tips.",
+            "description": "Watch this gameplay and subscribe for more tips. This video covers ranked gameplay, useful tactics, and practical tips for players.",
             "tags": ["Free Fire", "gameplay", "ranked"],
             "thumbnail": True,
         }
