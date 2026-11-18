@@ -3,7 +3,7 @@ import os
 from unittest.mock import patch
 from cryptography.fernet import Fernet
 
-from app import (callback_response, main_menu_keyboard, main_menu_text,
+from app import (callback_response, main_menu_keyboard, main_menu_text, format_youtube_accounts,
                  make_youtube_oauth_state, read_youtube_oauth_state,
                  encrypt_refresh_token, OAUTH_STATES)
 
@@ -14,8 +14,16 @@ class TelegramMenuTests(unittest.TestCase):
         callbacks = {button["callback_data"] for row in rows for button in row}
         self.assertEqual(callbacks, {
             "platform_youtube", "platform_instagram", "platform_facebook",
-            "platform_snapchat", "comments", "settings",
+            "platform_snapchat", "comments", "settings", "my_accounts",
         })
+
+    def test_my_accounts_formats_connected_channels_for_telegram(self):
+        message = format_youtube_accounts([{"account_name": "My Channel", "channel_id": "UC123"}])
+        self.assertIn("My Channel", message)
+        self.assertIn("UC123", message)
+
+    def test_my_accounts_shows_clear_empty_state(self):
+        self.assertIn("abhi connected nahi", format_youtube_accounts([]))
 
     def test_menu_greeting_uses_first_name(self):
         self.assertIn("Welcome Yogesh", main_menu_text("Yogesh"))
