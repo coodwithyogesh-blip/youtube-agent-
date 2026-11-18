@@ -60,8 +60,8 @@ def ai_reply(comment, video_title=""):
     fallback_model = env("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash")
     prompt = ("Write one short, natural, respectful YouTube creator reply. Do not invent facts, "
         "promise anything, request personal data, or include links. For medical, legal, financial "
-        "or private requests, politely say the creator cannot advise.\\n"
-        f"Video: {video_title}\\nComment: {comment}")
+        "or private requests, politely say the creator cannot advise.\n"
+        f"Video: {video_title}\nComment: {comment}")
     data = generate_content_with_fallback(
         key, model,
         {"contents":[{"parts":[{"text":prompt}]}],
@@ -230,7 +230,7 @@ def process_update(update):
             return
         try:
             register_user(user_id, chat_id, user.get("username", ""), user.get("first_name", ""))
-            send_tg(chat_id, "👋 Welcome to Social Media Agent!\\n\\n✅ Tumhara Telegram account Google Sheets mein register ho gaya.\\n\\nℹ️ YouTube/Instagram/Facebook/Snapchat account connection abhi agle development step mein hai. Filhaal bot kisi doosre user ke account ko access nahi karega.")
+            send_tg(chat_id, "👋 Welcome to Social Media Agent!\n\n✅ Tumhara Telegram account Google Sheets mein register ho gaya.\n\nℹ️ YouTube/Instagram/Facebook/Snapchat account connection abhi agle development step mein hai. Filhaal bot kisi doosre user ke account ko access nahi karega.")
         except Exception:
             log.exception("Google Sheets user registration failed")
             send_tg(chat_id, "❌ Registration abhi complete nahi hua. Bot owner ko Google Sheets credentials aur Sheet ID configure karni hogi.")
