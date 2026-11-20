@@ -1,12 +1,15 @@
 services:
   - type: web
     name: youtube-agent
-    runtime: python
+    runtime: docker
     plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --workers 1 --threads 8 --timeout 240
+    dockerfilePath: ./Dockerfile
     healthCheckPath: /healthz
     envVars:
+      - key: TELEGRAM_API_ID
+        sync: false
+      - key: TELEGRAM_API_HASH
+        sync: false
       - key: PYTHON_VERSION
         value: 3.12.8
       - key: AUTO_REPLY_MODE
