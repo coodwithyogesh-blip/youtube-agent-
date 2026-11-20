@@ -149,22 +149,52 @@ def generate_video_metadata(api_key, model, video_path, filename, caption="", pl
                 progress_callback(message)
             except Exception:
                 pass
-    endpoint = "https://generativelanguage.googleapis.com/upload/v1beta/files"
-    report("📤 Gemini par video bhej raha hoon…")
-    with open(video_path, "rb") as stream:
-        response = requests.post(
-            endpoint, params={"key": api_key},
-            headers={"X-Goog-Upload-Protocol": "multipart"},
-            files={"metadata": ("metadata", json.dumps({"file": {"display_name": filename[:100]}}), "application/json"),
-                   "file": (filename, stream, "video/mp4")},
-            timeout=min(300, max(30, int(max_processing_seconds))))
-    response.raise_for_status()
-    file_info = response.json().get("file", {})
-    file_uri, file_name = file_info.get("uri"), file_info.get("name")
-    if not file_uri or not file_name:
-        raise RuntimeError("Gemini did not return a usable video file reference")
+
+    file_info = {}
+    file_name = None
     try:
-        report("⏳ Gemini video process kar raha hai…")
+        report("📤 Gemini par video upload shuru ho raha hai…")
+        size = os.path.getsize(video_path)
+        # Gemini resumable upload: initiate, then stream the bytes to the returned URL.
+        start_response = requests.post(
+            "https://generativelanguage.googleapis.com/upload/v1beta/files",
+            params={"key": api_key},
+            headers={
+                "X-Goog-Upload-Protocol": "resumable",
+                "X-Goog-Upload-Command": "start",
+                "X-Goog-Upload-Header-Content-Length": str(size),
+                "X-Goog-Upload-Header-Content-Type": "video/mp4",
+                "Content-Type": "application/json",
+            },
+            json={"file": {"display_name": filename[:100]}},
+            timeout=30,
+        )
+        start_response.raise_for_status()
+        upload_url = start_response.headers.get("X-Goog-Upload-URL")
+        if not upload_url:
+            raise RuntimeError("Gemini upload session URL missing")
+        if time.monotonic() >= deadline:
+            raise RuntimeError("Gemini upload session timed out")
+        report("📤 Gemini ko video data bhej raha hoon…")
+        with open(video_path, "rb") as stream:
+            upload_response = requests.put(
+                upload_url,
+                headers={
+                    "X-Goog-Upload-Command": "upload, finalize",
+                    "X-Goog-Upload-Offset": "0",
+                    "Content-Length": str(size),
+                    "Content-Type": "video/mp4",
+                },
+                data=stream,
+                timeout=min(300, max(30, int(max_processing_seconds))),
+            )
+        upload_response.raise_for_status()
+        file_info = upload_response.json().get("file", {})
+        file_uri, file_name = file_info.get("uri"), file_info.get("name")
+        if not file_uri or not file_name:
+            raise RuntimeError("Gemini did not return a usable video file reference")
+
+        report("⏳ Gemini video processing shuru…")
         while time.monotonic() < deadline:
             status = requests.get(
                 "https://generativelanguage.googleapis.com/v1beta/" + file_name,
@@ -179,6 +209,7 @@ def generate_video_metadata(api_key, model, video_path, filename, caption="", pl
             time.sleep(min(10, max(1, deadline - time.monotonic())))
         else:
             raise RuntimeError("Gemini video processing timed out (30 minutes)")
+
         if str(platform or "youtube").lower() in ("instagram", "facebook", "snapchat"):
             prompt = social_video_prompt(platform, caption)
         else:
@@ -204,8 +235,6 @@ def generate_video_metadata(api_key, model, video_path, filename, caption="", pl
                                           "data": base64.b64encode(image_bytes).decode("ascii")}})
             prompt += " Also inspect the supplied thumbnail image for visual context, but do not mistake thumbnail-only elements as events occurring in the video."
             parts[0]["text"] = prompt
-        if time.monotonic() >= deadline:
-            raise RuntimeError("Gemini processing timed out (30 minutes)")
         report("✍️ Title, description aur tags generate kar raha hai…")
         generated = generate_content_with_fallback(
             api_key, model,
@@ -215,12 +244,16 @@ def generate_video_metadata(api_key, model, video_path, filename, caption="", pl
             max_attempts=2)
         text = generated["candidates"][0]["content"]["parts"][0]["text"]
         return clean_generated_metadata(json.loads(text))
+    except requests.RequestException as exc:
+        report("❌ Gemini upload/API connection fail hua. Dobara video bhejo.")
+        raise RuntimeError("Gemini upload/API network error: " + type(exc).__name__) from None
     finally:
-        try:
-            requests.delete("https://generativelanguage.googleapis.com/v1beta/" + file_name,
-                            params={"key": api_key}, timeout=15)
-        except Exception:
-            pass
+        if file_name:
+            try:
+                requests.delete("https://generativelanguage.googleapis.com/v1beta/" + file_name,
+                               params={"key": api_key}, timeout=15)
+            except Exception:
+                pass
 
 def should_auto_reply(comment):
     text = (comment or "").strip().lower()
