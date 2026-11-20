@@ -830,6 +830,8 @@ def process_update(update):
         message = query.get("message") or {}
         chat = message.get("chat") or {}
         chat_id = chat.get("id")
+        log.info("Telegram callback data=%s chat_id=%s chat_type=%s message_present=%s",
+                 data[:80], chat_id, chat.get("type"), bool(message))
         # Expired/duplicate callback queries are harmless; don't fail the whole update.
         try:
             tg("answerCallbackQuery", {"callback_query_id": query.get("id", "")})
@@ -837,10 +839,17 @@ def process_update(update):
             log.warning("Callback query could not be answered (possibly expired)", exc_info=True)
         if chat_id and chat.get("type") == "private":
             if data == "menu":
-                tg("editMessageText", {"chat_id": chat_id,
-                    "message_id": message.get("message_id"),
-                    "text": main_menu_text((query.get("from") or {}).get("first_name", "")),
-                    "reply_markup": main_menu_keyboard()})
+                menu_text = main_menu_text((query.get("from") or {}).get("first_name", ""))
+                try:
+                    tg("editMessageText", {"chat_id": chat_id,
+                        "message_id": message.get("message_id"),
+                        "text": menu_text,
+                        "reply_markup": main_menu_keyboard()})
+                except Exception:
+                    log.exception("Main-menu message edit failed; sending a fresh menu")
+                    send_tg(chat_id, menu_text)
+                    tg("sendMessage", {"chat_id": chat_id, "text": "Main menu:",
+                        "reply_markup": main_menu_keyboard()})
 
             elif data == "my_accounts":
                 try:
