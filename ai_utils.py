@@ -240,8 +240,8 @@ def generate_video_metadata(api_key, model, video_path, filename, caption="", pl
             api_key, model,
             {"contents": [{"parts": parts}],
              "generationConfig": {"temperature": 0.35, "responseMimeType": "application/json"}},
-            timeout=90, fallback_model=os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash-lite"),
-            max_attempts=2)
+            timeout=120, fallback_model=os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash-lite"),
+            max_attempts=6)
         text = generated["candidates"][0]["content"]["parts"][0]["text"]
         return clean_generated_metadata(json.loads(text))
     except requests.RequestException as exc:
