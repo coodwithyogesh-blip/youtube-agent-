@@ -142,6 +142,13 @@ def social_video_prompt(platform, caption=""):
 def generate_video_metadata(api_key, model, video_path, filename, caption="", platform="youtube", thumbnail_path=None, progress_callback=None, max_processing_seconds=1800):
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is required for automatic video metadata")
+    deadline = time.monotonic() + max(60, int(max_processing_seconds))
+    def report(message):
+        if progress_callback:
+            try:
+                progress_callback(message)
+            except Exception:
+                pass
     endpoint = "https://generativelanguage.googleapis.com/upload/v1beta/files"
     report("📤 Gemini par video bhej raha hoon…")
     with open(video_path, "rb") as stream:
@@ -149,7 +156,8 @@ def generate_video_metadata(api_key, model, video_path, filename, caption="", pl
             endpoint, params={"key": api_key},
             headers={"X-Goog-Upload-Protocol": "multipart"},
             files={"metadata": ("metadata", json.dumps({"file": {"display_name": filename[:100]}}), "application/json"),
-                   "file": (filename, stream, "video/mp4")}, timeout=min(300, max(30, int(max_processing_seconds)))
+                   "file": (filename, stream, "video/mp4")},
+            timeout=min(300, max(30, int(max_processing_seconds))))
     response.raise_for_status()
     file_info = response.json().get("file", {})
     file_uri, file_name = file_info.get("uri"), file_info.get("name")
