@@ -8,7 +8,7 @@ Cloud-first Flask app for Render. No SQLite, no Supabase, and no Termux/local se
 3. When both arrive, Gemini analyses the actual video and generates the title, description, SEO tags and hashtags.
 4. The app uploads the video as **Public** and sets the thumbnail you supplied. AI does not create or replace the thumbnail.
 
-No manual title, description, tags or hashtags are required. An optional Telegram caption is passed to Gemini as extra context. The Telegram Bot API download limit is 20 MB per file; send a smaller/compressed video if the bot cannot download it. Thumbnail must be 2 MB or smaller.
+No manual title, description, tags or hashtags are required. An optional Telegram caption is passed to Gemini as extra context. The standard Telegram Bot API is limited to 20 MB for file downloads. This repository now uses Telegram Local Bot API in its Docker deployment to support larger downloads (subject to hosting disk, bandwidth and service limits). Thumbnail must be 2 MB or smaller.
 
 ## Automatic YouTube comment replies
 - `AUTO_REPLY_MODE=automatic` enables unattended AI replies.
@@ -37,9 +37,15 @@ Set these in Render Environment:
 ## OAuth
 This app requests `youtube.force-ssl`, `youtube.upload`, and `yt-analytics.readonly`. After deploying, reconnect each Telegram YouTube account so the new Analytics permission is granted. Enable the YouTube Analytics API in the same Google Cloud project. The SEO report shows channel totals, a 28-day views/watch-time/subscriber trend graph, a score-distribution graph (poor/fair/good/excellent), and all weak videos below 80/100. Each weak video has its own Review & Fix button. Gemini prepares a title/description/tags preview using only the existing metadata; nothing changes on YouTube until the owner presses Confirm & Update for that specific video. Preview confirmations expire after 15 minutes, and changed source metadata invalidates the preview. Thumbnail design is not auto-edited. Metadata completeness is not a ranking guarantee. Add exact redirect URI `https://YOUR-RENDER-HOST/oauth/callback` in Google Cloud OAuth settings. Never share the refresh token.
 
-## Render
-- Build: `pip install -r requirements.txt`
-- Start: `gunicorn app:app --workers 1 --threads 8 --timeout 240`
+## Render deployment (Local Bot API for large Telegram videos)
+1. Deploy this repository as a **Docker Web Service**, using the included `Dockerfile` and `render.yaml`.
+2. Set `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` from [my.telegram.org](https://my.telegram.org) in Render Environment.
+3. Keep the other app environment variables listed above configured (bot token, webhook secret, Google OAuth, Gemini, Sheets, encryption keys, manager token, external URL).
+4. Redeploy/build the Docker service. The Docker image builds Telegram Local Bot API and `start-local-api.sh` starts it before Gunicorn.
+5. Confirm the service is healthy at `/healthz`, then send a video larger than 20 MB to the bot and check logs.
+
+The Telegram webhook download code uses configurable Local Bot API endpoints and streams the file to temporary disk instead of loading the whole download into memory. This is designed to remove the standard 20 MB download restriction. Actual maximum size depends on Local Bot API, Render disk, request limits, available resources and Gemini video processing limits.
+
 - Health check: `/healthz`
 
 ## Google Sheets storage
