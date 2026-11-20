@@ -1009,14 +1009,21 @@ def process_update(update):
         if chat.get("type") != "private":
             send_tg(chat_id, "Please mujhe private chat mein /start bhejo, taaki tumhara account alag register ho sake.")
             return
+        registration_ok = False
         try:
             register_user(user_id, chat_id, user.get("username", ""), user.get("first_name", ""))
-            tg("sendMessage", {"chat_id": chat_id,
-                "text": main_menu_text(user.get("first_name", "")) + "\n\n✅ Telegram account Google Sheets mein registered.",
-                "reply_markup": main_menu_keyboard()})
+            registration_ok = True
         except Exception:
+            # Registration/storage errors must not prevent the bot from replying
+            # and displaying its menu to the user.
             log.exception("Google Sheets user registration failed")
-            send_tg(chat_id, "❌ Registration abhi complete nahi hua. Bot owner ko Google Sheets credentials aur Sheet ID configure karni hogi.")
+        welcome = main_menu_text(user.get("first_name", ""))
+        if registration_ok:
+            welcome += "\\n\\n✅ Telegram account Google Sheets mein registered."
+        else:
+            welcome += "\\n\\n⚠️ Menu available; registration storage temporarily unavailable."
+        tg("sendMessage", {"chat_id": chat_id, "text": welcome,
+            "reply_markup": main_menu_keyboard()})
         return
     if text.startswith("/menu"):
         tg("sendMessage", {"chat_id": chat_id, "text": main_menu_text(user.get("first_name", "")),
