@@ -31,4 +31,26 @@ sys.exit("Telegram Local API server did not start")
 PY
 gunicorn app:app --workers 1 --threads 8 --timeout 240 &
 APP_PID=$!
+
+# Automatically configure Telegram webhook from Render environment after app readiness.
+if [ -n "${RENDER_EXTERNAL_URL:-}" ] && [ -n "${MANAGER_API_TOKEN:-}" ]; then
+  python - <<'PY'
+import os, time, urllib.request
+base=os.environ.get("RENDER_EXTERNAL_URL","").rstrip("/")
+token=os.environ.get("MANAGER_API_TOKEN","")
+if base and token:
+    for _ in range(60):
+        try:
+            req=urllib.request.Request(base+"/admin/set-webhook", method="POST",
+                headers={"X-Manager-Token":token})
+            with urllib.request.urlopen(req, timeout=8) as response:
+                print("Telegram webhook auto-setup:", response.read().decode()[:300])
+            break
+        except Exception as exc:
+            print("Webhook auto-setup waiting:", type(exc).__name__)
+            time.sleep(2)
+PY
+else
+  echo "Webhook auto-setup skipped: RENDER_EXTERNAL_URL or MANAGER_API_TOKEN missing."
+fi
 wait "$APP_PID"
