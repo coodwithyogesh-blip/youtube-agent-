@@ -34,7 +34,8 @@ SEO_FIX_PENDING = {}
 SOCIAL_DRAFTS = {}
 SOCIAL_MEDIA = {}  # temporary video files; never persisted
 AUTO_THREAD_STARTED = False
-TELEGRAM_API = "https://api.telegram.org/bot"
+TELEGRAM_API = env("TELEGRAM_API_BASE", "https://api.telegram.org/bot")
+TELEGRAM_FILE_API = env("TELEGRAM_FILE_BASE", "https://api.telegram.org/file/bot")
 
 def env(name, default=""):
     return os.getenv(name, default).strip()
@@ -156,13 +157,19 @@ def telegram_download(file_id, suffix):
     info = tg("getFile", {"file_id":file_id})
     path = info.get("file_path","")
     size = int(info.get("file_size",0))
-    if not path or size > 20 * 1024 * 1024:
-        raise RuntimeError("Telegram Bot API download limit: file must be 20 MB or smaller")
+    # Standard Telegram Bot API downloads are capped at 20 MB. Local Bot API
+    # mode is used for larger files; don't apply that limit in local mode.
+    local_mode = bool(env("TELEGRAM_FILE_BASE"))
+    if not path or (not local_mode and size > 20 * 1024 * 1024):
+        raise RuntimeError("Standard Telegram API download limit is 20 MB. Deploy Local Bot API mode for larger videos.")
     token = env("TELEGRAM_BOT_TOKEN")
-    response = requests.get(f"https://api.telegram.org/file/bot{token}/{path}", timeout=90)
+    file_url = f"{TELEGRAM_FILE_API}{token}/{path}"
+    response = requests.get(file_url, timeout=(30, 300), stream=True)
     response.raise_for_status()
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp.write(response.content)
+        for chunk in response.iter_content(chunk_size=1024*1024):
+            if chunk:
+                tmp.write(chunk)
         return tmp.name
 
 def remove_media(chat_id):
