@@ -112,7 +112,7 @@ def tg(method, payload):
     token = env("TELEGRAM_BOT_TOKEN")
     if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN missing")
-    r = requests.post(f"{TELEGRAM_API}{token}/{method}", json=payload, timeout=30)
+    r = requests.post(f"{TELEGRAM_API}{token}/{method}", json=payload, timeout=600)
     r.raise_for_status()
     data = r.json()
     if not data.get("ok"):
@@ -164,7 +164,7 @@ def telegram_download(file_id, suffix):
         raise RuntimeError("Standard Telegram API download limit is 20 MB. Deploy Local Bot API mode for larger videos.")
     token = env("TELEGRAM_BOT_TOKEN")
     file_url = f"{TELEGRAM_FILE_API}{token}/{path}"
-    response = requests.get(file_url, timeout=(30, 300), stream=True)
+    response = requests.get(file_url, timeout=(60, 600), stream=True)
     response.raise_for_status()
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         for chunk in response.iter_content(chunk_size=1024*1024):
@@ -397,8 +397,7 @@ def scan_all_connected_channels(raise_errors=False):
         return auto_reply_scan()
     for account in accounts:
         try:
-            token = decrypt_refresh_token(account["refresh_token_enc"])
-            service = build("youtube", "v3",
+            token = decrypt_refresh_token(account["refresh_token_enc"])            service = build("youtube", "v3",
                 credentials=youtube_credentials_for_token(token), cache_discovery=False)
             total += auto_reply_scan_for_service(
                 service, account["channel_id"],
@@ -797,8 +796,7 @@ def process_update(update):
                     except Exception as exc:
                         log.exception("SEO fix preview failed")
                         send_tg(chat_id, "❌ SEO preview nahi ban paya: " + str(exc)[:250])
-            elif data.startswith("seoapply:"):
-                parts = data.split(":", 2)
+            elif data.startswith("seoapply:"):                parts = data.split(":", 2)
                 if len(parts) == 3:
                     channel_id, video_id = parts[1], parts[2]
                     user_id = str((query.get("from") or {}).get("id"))
@@ -1198,13 +1196,3 @@ def set_webhook():
         return jsonify(error="unauthorized"),401
     base=env("RENDER_EXTERNAL_URL").rstrip("/")
     result=tg("setWebhook",{"url":base+"/telegram/webhook","secret_token":env("TELEGRAM_WEBHOOK_SECRET"),
-        "allowed_updates":["message","callback_query"],"drop_pending_updates":False})
-    return jsonify(ok=True,result=result)
-
-@app.errorhandler(Exception)
-def errors(exc):
-    if isinstance(exc,HTTPException): return exc
-    log.exception("Unhandled request error"); return jsonify(error="internal_error"),500
-
-if __name__=="__main__":
-    app.run(host="0.0.0.0",port=int(env("PORT","10000")))
