@@ -186,7 +186,7 @@ def generate_video_metadata(api_key, model, video_path, filename, caption="", pl
                     "Content-Type": "video/mp4",
                 },
                 data=stream,
-                timeout=min(300, max(30, int(max_processing_seconds))),
+                timeout=max(1800, int(max_processing_seconds)),
             )
         upload_response.raise_for_status()
         file_info = upload_response.json().get("file", {})
