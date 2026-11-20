@@ -153,7 +153,7 @@ def authorized(user_id, chat_id):
     owner, group = env("TELEGRAM_OWNER_ID"), env("TELEGRAM_GROUP_ID")
     return bool(owner and str(user_id) == owner and (not group or str(chat_id) == group))
 
-def telegram_download(file_id, suffix):
+def telegram_download(file_id, suffix, chat_id=None):
     info = tg("getFile", {"file_id":file_id})
     path = info.get("file_path","")
     size = int(info.get("file_size",0))
@@ -164,13 +164,38 @@ def telegram_download(file_id, suffix):
         raise RuntimeError("Standard Telegram API download limit is 20 MB. Deploy Local Bot API mode for larger videos.")
     token = env("TELEGRAM_BOT_TOKEN")
     file_url = f"{TELEGRAM_FILE_API}{token}/{path}"
+    progress_msg = None
+    if chat_id is not None:
+        progress_msg = tg("sendMessage", {"chat_id": chat_id,
+            "text": "⬇️ Download shuru... 0%\n📦 Size: " + (("{:.1f} MB".format(size/1024/1024)) if size else "unknown")})
     response = requests.get(file_url, timeout=(60, 600), stream=True)
     response.raise_for_status()
+    downloaded = 0
+    last_update = 0
+    last_percent = -1
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         for chunk in response.iter_content(chunk_size=1024*1024):
             if chunk:
                 tmp.write(chunk)
-        return tmp.name
+                downloaded += len(chunk)
+                if progress_msg and size:
+                    percent = min(100, int(downloaded * 100 / size))
+                    if percent >= last_percent + 5 or time.time() - last_update >= 3:
+                        try:
+                            tg("editMessageText", {"chat_id": chat_id,
+                                "message_id": progress_msg["message_id"],
+                                "text": "⬇️ Download ho raha hai... {}%\n📦 {:.1f} / {:.1f} MB".format(percent, downloaded/1024/1024, size/1024/1024)})
+                            last_percent, last_update = percent, time.time()
+                        except Exception:
+                            pass
+        temp_path = tmp.name
+    if progress_msg:
+        try:
+            tg("editMessageText", {"chat_id": chat_id,
+                "message_id": progress_msg["message_id"], "text": "✅ Download complete! 100%"})
+        except Exception:
+            pass
+    return temp_path
 
 def remove_media(chat_id):
     item = MEDIA.pop(str(chat_id), {})
@@ -223,7 +248,7 @@ def receive_media(message, chat_id, user_id):
         obj = message.get("video") or message["document"]
         if item.get("video") and os.path.isfile(item["video"]):
             os.remove(item["video"])
-        item["video"] = telegram_download(obj["file_id"], ".mp4")
+        item["video"] = telegram_download(obj["file_id"], ".mp4", chat_id)
         item["filename"] = obj.get("file_name") or "telegram-video.mp4"
         item["mime"] = obj.get("mime_type") or "video/mp4"
         item["caption"] = message.get("caption","")
@@ -232,7 +257,7 @@ def receive_media(message, chat_id, user_id):
         photo = message["photo"][-1]
         if item.get("thumbnail") and os.path.isfile(item["thumbnail"]):
             os.remove(item["thumbnail"])
-        item["thumbnail"] = telegram_download(photo["file_id"], ".jpg")
+        item["thumbnail"] = telegram_download(photo["file_id"], ".jpg", chat_id)
         item["thumb_mime"] = "image/jpeg"
         send_tg(chat_id,"✅ Thumbnail mil gaya.")
     else:
