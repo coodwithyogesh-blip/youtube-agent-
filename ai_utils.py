@@ -139,35 +139,38 @@ def social_video_prompt(platform, caption=""):
     )
 
 
-def generate_video_metadata(api_key, model, video_path, filename, caption="", platform="youtube", thumbnail_path=None):
+def generate_video_metadata(api_key, model, video_path, filename, caption="", platform="youtube", thumbnail_path=None, progress_callback=None, max_processing_seconds=1800):
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is required for automatic video metadata")
     endpoint = "https://generativelanguage.googleapis.com/upload/v1beta/files"
+    report("📤 Gemini par video bhej raha hoon…")
     with open(video_path, "rb") as stream:
         response = requests.post(
             endpoint, params={"key": api_key},
             headers={"X-Goog-Upload-Protocol": "multipart"},
             files={"metadata": ("metadata", json.dumps({"file": {"display_name": filename[:100]}}), "application/json"),
-                   "file": (filename, stream, "video/mp4")}, timeout=180)
+                   "file": (filename, stream, "video/mp4")}, timeout=min(300, max(30, int(max_processing_seconds)))
     response.raise_for_status()
     file_info = response.json().get("file", {})
     file_uri, file_name = file_info.get("uri"), file_info.get("name")
     if not file_uri or not file_name:
         raise RuntimeError("Gemini did not return a usable video file reference")
     try:
-        for _ in range(30):
+        report("⏳ Gemini video process kar raha hai…")
+        while time.monotonic() < deadline:
             status = requests.get(
                 "https://generativelanguage.googleapis.com/v1beta/" + file_name,
-                params={"key": api_key}, timeout=20)
+                params={"key": api_key}, timeout=15)
             status.raise_for_status()
             state = status.json()
             if state.get("state") == "ACTIVE":
                 break
             if state.get("state") == "FAILED":
                 raise RuntimeError("Gemini could not process this video")
-            time.sleep(2)
+            report("⏳ Gemini video processing abhi chal rahi hai…")
+            time.sleep(min(10, max(1, deadline - time.monotonic())))
         else:
-            raise RuntimeError("Gemini video processing timed out")
+            raise RuntimeError("Gemini video processing timed out (30 minutes)")
         if str(platform or "youtube").lower() in ("instagram", "facebook", "snapchat"):
             prompt = social_video_prompt(platform, caption)
         else:
@@ -181,6 +184,7 @@ def generate_video_metadata(api_key, model, video_path, filename, caption="", pl
                 "when clear; otherwise use English. Never claim anything not shown. "
                 f"Uploader note/Telegram caption: {caption[:1000]}"
             )
+        report("🖼️ Video aur thumbnail analyse kar raha hai…")
         parts = [{"text": prompt},
                  {"file_data": {"mime_type": file_info.get("mimeType", "video/mp4"),
                                 "file_uri": file_uri}}]
@@ -192,12 +196,15 @@ def generate_video_metadata(api_key, model, video_path, filename, caption="", pl
                                           "data": base64.b64encode(image_bytes).decode("ascii")}})
             prompt += " Also inspect the supplied thumbnail image for visual context, but do not mistake thumbnail-only elements as events occurring in the video."
             parts[0]["text"] = prompt
+        if time.monotonic() >= deadline:
+            raise RuntimeError("Gemini processing timed out (30 minutes)")
+        report("✍️ Title, description aur tags generate kar raha hai…")
         generated = generate_content_with_fallback(
             api_key, model,
             {"contents": [{"parts": parts}],
              "generationConfig": {"temperature": 0.35, "responseMimeType": "application/json"}},
-            timeout=120, fallback_model=os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash-lite"),
-            max_attempts=4)
+            timeout=90, fallback_model=os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash-lite"),
+            max_attempts=2)
         text = generated["candidates"][0]["content"]["parts"][0]["text"]
         return clean_generated_metadata(json.loads(text))
     finally:
