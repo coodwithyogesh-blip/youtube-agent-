@@ -34,11 +34,11 @@ SEO_FIX_PENDING = {}
 SOCIAL_DRAFTS = {}
 SOCIAL_MEDIA = {}  # temporary video files; never persisted
 AUTO_THREAD_STARTED = False
-TELEGRAM_API = env("TELEGRAM_API_BASE", "https://api.telegram.org/bot")
-TELEGRAM_FILE_API = env("TELEGRAM_FILE_BASE", "https://api.telegram.org/file/bot")
-
 def env(name, default=""):
     return os.getenv(name, default).strip()
+
+TELEGRAM_API = env("TELEGRAM_API_BASE", "https://api.telegram.org/bot")
+TELEGRAM_FILE_API = env("TELEGRAM_FILE_BASE", "https://api.telegram.org/file/bot")
 
 
 def youtube_oauth_state_serializer():
