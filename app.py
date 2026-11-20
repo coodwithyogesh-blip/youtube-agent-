@@ -422,7 +422,8 @@ def scan_all_connected_channels(raise_errors=False):
         return auto_reply_scan()
     for account in accounts:
         try:
-            token = decrypt_refresh_token(account["refresh_token_enc"])            service = build("youtube", "v3",
+            token = decrypt_refresh_token(account["refresh_token_enc"])
+            service = build("youtube", "v3",
                 credentials=youtube_credentials_for_token(token), cache_discovery=False)
             total += auto_reply_scan_for_service(
                 service, account["channel_id"],
