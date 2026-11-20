@@ -761,6 +761,20 @@ def callback_response(data):
     return messages.get(data, "Unknown option. /menu bhejkar dobara try karo.")
 
 
+def handle_media_message(message, chat_id, user_id):
+    """Process Telegram media asynchronously so webhook requests return promptly."""
+    try:
+        if str(chat_id) in SOCIAL_MEDIA and receive_social_video(message, chat_id, user_id):
+            return
+        receive_media(message, chat_id, user_id)
+    except Exception as exc:
+        log.exception("Telegram media processing failed")
+        try:
+            send_tg(chat_id, "❌ Media receive error: " + str(exc)[:500])
+        except Exception:
+            log.exception("Could not notify Telegram about media failure")
+
+
 def process_update(update):
     if "callback_query" in update:
         query = update.get("callback_query") or {}
@@ -837,7 +851,8 @@ def process_update(update):
                     except Exception as exc:
                         log.exception("SEO fix preview failed")
                         send_tg(chat_id, "❌ SEO preview nahi ban paya: " + str(exc)[:250])
-            elif data.startswith("seoapply:"):                parts = data.split(":", 2)
+            elif data.startswith("seoapply:"):
+                parts = data.split(":", 2)
                 if len(parts) == 3:
                     channel_id, video_id = parts[1], parts[2]
                     user_id = str((query.get("from") or {}).get("id"))
@@ -1009,22 +1024,12 @@ def process_update(update):
             send_tg(chat_id, "❌ " + str(exc))
         return
     if message.get("video") or message.get("photo") or message.get("document"):
-        if chat.get("type") == "private" and str(chat_id) in SOCIAL_MEDIA:
-            try:
-                if receive_social_video(message, chat_id, user_id):
-                    return
-            except Exception as exc:
-                log.exception("Social video receive failed")
-                send_tg(chat_id, "❌ Media receive error: " + str(exc)[:350])
-                return
         if chat.get("type") != "private":
             send_tg(chat_id, "Security ke liye upload private Telegram chat mein karo.")
             return
-        try:
-            receive_media(message, chat_id, user_id)
-        except Exception as exc:
-            log.exception("Telegram media download failed")
-            send_tg(chat_id, "❌ Media receive error: " + str(exc)[:500])
+        # Return webhook promptly; process media downloads/analysis in a background thread.
+        threading.Thread(target=handle_media_message,
+            args=(message, chat_id, user_id), daemon=True).start()
         return
     if not authorized(user_id,chat_id):
         return
