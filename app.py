@@ -1141,21 +1141,35 @@ def health():
 @app.post("/telegram/webhook")
 def telegram_webhook():
     secret=env("TELEGRAM_WEBHOOK_SECRET")
-    if not secret or not hmac.compare_digest(request.headers.get("X-Telegram-Bot-Api-Secret-Token",""),secret):
+    if not secret:
+        log.error("Webhook request rejected: TELEGRAM_WEBHOOK_SECRET is not configured")
+        return jsonify(error="webhook secret not configured"),500
+    supplied=request.headers.get("X-Telegram-Bot-Api-Secret-Token","")
+    if not hmac.compare_digest(supplied,secret):
+        log.warning("Webhook request rejected: secret header mismatch")
         return jsonify(error="unauthorized"),401
     update=request.get_json(silent=True) or {}
-    if not isinstance(update,dict) or "update_id" not in update: return jsonify(error="invalid update"),400
+    if not isinstance(update,dict) or "update_id" not in update:
+        log.warning("Webhook request rejected: invalid JSON/update")
+        return jsonify(error="invalid update"),400
     update_id = update.get("update_id")
-    # Telegram retries when a webhook takes too long. Do not process the same
-    # photo/video twice after the first run has already consumed its MEDIA state.
+    kind = "callback_query" if "callback_query" in update else "message" if "message" in update else "other"
+    message = update.get("message") or {}
+    text_value = (message.get("text") or "") if isinstance(message,dict) else ""
+    log.info("Telegram webhook received update_id=%s type=%s command=%s",
+             update_id, kind, text_value[:32] if text_value.startswith("/") else "(non-command)")
     if update_id in DONE_TELEGRAM_UPDATES:
+        log.info("Telegram duplicate update ignored: %s", update_id)
         return jsonify(ok=True, duplicate=True)
     DONE_TELEGRAM_UPDATES.add(update_id)
     if len(DONE_TELEGRAM_UPDATES) > 5000:
         DONE_TELEGRAM_UPDATES.clear()
         DONE_TELEGRAM_UPDATES.add(update_id)
-    try: process_update(update)
-    except Exception: log.exception("Telegram update failed")
+    try:
+        process_update(update)
+        log.info("Telegram update processed: %s", update_id)
+    except Exception:
+        log.exception("Telegram update failed update_id=%s", update_id)
     return jsonify(ok=True)
 
 @app.get("/oauth/youtube/start")
@@ -1267,6 +1281,16 @@ def oauth_callback():
     if not token: return "Google did not return a refresh token. Revoke app access and authorize again.",400
     return ("<h2>YouTube authorization successful</h2><p>Copy refresh token into Render as "
         "<b>YOUTUBE_REFRESH_TOKEN</b>. Never share it.</p><textarea style='width:100%;height:120px'>"+html.escape(token)+"</textarea>")
+
+@app.get("/admin/webhook-status")
+def webhook_status():
+    if not env("MANAGER_API_TOKEN") or not hmac.compare_digest(request.headers.get("X-Manager-Token",""),env("MANAGER_API_TOKEN")):
+        return jsonify(error="unauthorized"),401
+    result=tg("getWebhookInfo", {})
+    # Avoid exposing webhook URL or secret in diagnostics.
+    safe = {k:v for k,v in result.items() if k not in ("url",)}
+    safe["url_configured"] = bool(result.get("url"))
+    return jsonify(ok=True, webhook=safe)
 
 @app.post("/admin/set-webhook")
 def set_webhook():
