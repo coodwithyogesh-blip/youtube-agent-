@@ -256,7 +256,7 @@ def receive_social_video(message, chat_id, user_id):
         return False
     obj = message.get("video") or message.get("document")
     if not obj or (message.get("document") and not (obj.get("mime_type") or "").startswith("video/")):
-        send_tg(chat_id, "Video file bhejo (20 MB tak).")
+        send_tg(chat_id, "Video file bhejo (Local Bot API mode mein 20 MB se bade videos bhi supported hain, hosting limits ke adheen).")
         return True
     path = telegram_download(obj["file_id"], ".mp4")
     item.update({"video": path, "filename": obj.get("file_name") or "video.mp4",
