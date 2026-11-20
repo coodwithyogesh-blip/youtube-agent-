@@ -166,40 +166,72 @@ def authorized(user_id, chat_id):
 
 def telegram_download(file_id, suffix, chat_id=None):
     info = tg("getFile", {"file_id":file_id})
-    path = info.get("file_path","")
-    size = int(info.get("file_size",0))
-    # Standard Telegram Bot API downloads are capped at 20 MB. Local Bot API
-    # mode is used for larger files; don't apply that limit in local mode.
+    path = info.get("file_path", "")
+    size = int(info.get("file_size", 0))
     local_mode = bool(env("TELEGRAM_FILE_BASE"))
     if not path or (not local_mode and size > 20 * 1024 * 1024):
         raise RuntimeError("Standard Telegram API download limit is 20 MB. Deploy Local Bot API mode for larger videos.")
-    token = env("TELEGRAM_BOT_TOKEN")
-    file_url = f"{TELEGRAM_FILE_API}{token}/{path}"
+
     progress_msg = None
     if chat_id is not None:
         progress_msg = tg("sendMessage", {"chat_id": chat_id,
-            "text": "⬇️ Download shuru... 0%\n📦 Size: " + (("{:.1f} MB".format(size/1024/1024)) if size else "unknown")})
-    response = requests.get(file_url, timeout=(60, 600), stream=True)
-    response.raise_for_status()
+            "text": "⬇️ Download shuru... 0%\\n📦 Size: " + (("{:.1f} MB".format(size/1024/1024)) if size else "unknown")})
+
     downloaded = 0
     last_update = 0
     last_percent = -1
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        for chunk in response.iter_content(chunk_size=1024*1024):
-            if chunk:
-                tmp.write(chunk)
-                downloaded += len(chunk)
-                if progress_msg and size:
-                    percent = min(100, int(downloaded * 100 / size))
-                    if percent >= last_percent + 5 or time.time() - last_update >= 3:
-                        try:
-                            tg("editMessageText", {"chat_id": chat_id,
-                                "message_id": progress_msg["message_id"],
-                                "text": "⬇️ Download ho raha hai... {}%\n📦 {:.1f} / {:.1f} MB".format(percent, downloaded/1024/1024, size/1024/1024)})
-                            last_percent, last_update = percent, time.time()
-                        except Exception:
-                            pass
         temp_path = tmp.name
+        try:
+            if local_mode and os.path.isabs(path):
+                # Local Bot API returns an absolute path. Read it directly from
+                # the shared container filesystem instead of constructing a URL
+                # with a double slash after /file/bot<TOKEN>.
+                with open(path, "rb") as source:
+                    while True:
+                        chunk = source.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        tmp.write(chunk)
+                        downloaded += len(chunk)
+                        if progress_msg and size:
+                            percent = min(100, int(downloaded * 100 / size))
+                            if percent >= last_percent + 5 or time.time() - last_update >= 3:
+                                try:
+                                    tg("editMessageText", {"chat_id": chat_id,
+                                        "message_id": progress_msg["message_id"],
+                                        "text": "⬇️ Download ho raha hai... {}%\\n📦 {:.1f} / {:.1f} MB".format(percent, downloaded/1024/1024, size/1024/1024)})
+                                    last_percent, last_update = percent, time.time()
+                                except Exception:
+                                    pass
+            else:
+                token = env("TELEGRAM_BOT_TOKEN")
+                file_url = f"{TELEGRAM_FILE_API}{token}/{path.lstrip('/')}"
+                response = requests.get(file_url, timeout=(60, 600), stream=True)
+                response.raise_for_status()
+                for chunk in response.iter_content(chunk_size=1024*1024):
+                    if chunk:
+                        tmp.write(chunk)
+                        downloaded += len(chunk)
+                        if progress_msg and size:
+                            percent = min(100, int(downloaded * 100 / size))
+                            if percent >= last_percent + 5 or time.time() - last_update >= 3:
+                                try:
+                                    tg("editMessageText", {"chat_id": chat_id,
+                                        "message_id": progress_msg["message_id"],
+                                        "text": "⬇️ Download ho raha hai... {}%\\n📦 {:.1f} / {:.1f} MB".format(percent, downloaded/1024/1024, size/1024/1024)})
+                                    last_percent, last_update = percent, time.time()
+                                except Exception:
+                                    pass
+                response.close()
+        except Exception:
+            tmp.close()
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+            raise
+
     if progress_msg:
         try:
             tg("editMessageText", {"chat_id": chat_id,
