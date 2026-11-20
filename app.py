@@ -252,27 +252,43 @@ def upload_telegram_pair(chat_id):
     if not item.get("video") or not item.get("thumbnail") or item.get("busy"):
         return
     item["busy"] = True
+    progress_msg = None
     try:
-        send_tg(chat_id, "⏳ Gemini ko video aur thumbnail bhej raha hoon. Ismein thoda samay lag sakta hai…")
+        progress_msg = send_tg(chat_id, "📤 Gemini par video bhej raha hoon…")
+        def update_video_status(stage):
+            if not progress_msg:
+                send_tg(chat_id, stage)
+                return
+            try:
+                tg("editMessageText", {"chat_id": chat_id,
+                    "message_id": progress_msg["message_id"], "text": stage})
+            except Exception:
+                log.warning("Video processing status update failed")
         metadata = generate_video_metadata(env("GEMINI_API_KEY"),
             env("GEMINI_MODEL","gemini-3.8-flash"), item["video"], item.get("filename","video.mp4"),
-            item.get("caption",""), thumbnail_path=item["thumbnail"])
+            item.get("caption",""), thumbnail_path=item["thumbnail"],
+            progress_callback=update_video_status, max_processing_seconds=1800)
+        update_video_status("✍️ Title, description aur tags taiyar hain. YouTube upload shuru ho raha hai…")
         body = build_video_metadata(metadata["title"], metadata["description"],
                                     json.dumps(metadata["tags"]), "public", None)
         media = MediaFileUpload(item["video"], chunksize=8*1024*1024,
                                 resumable=True, mimetype=item.get("mime","video/mp4"))
         service = youtube_service_for_user(item["user_id"], item["selected_channel_id"])
+        update_video_status("📤 YouTube par video upload ho raha hai…")
         result = service.videos().insert(part="snippet,status", body=body, media_body=media).execute()
         video_id = result["id"]
         if os.path.getsize(item["thumbnail"]) > 2*1024*1024:
             raise RuntimeError("Video upload ho gaya, lekin thumbnail 2 MB se bada hai. YouTube limit ke andar thumbnail bhejo.")
+        update_video_status("🖼️ YouTube thumbnail set kar raha hoon…")
         service.thumbnails().set(videoId=video_id,
             media_body=MediaFileUpload(item["thumbnail"], resumable=False,
                                        mimetype=item.get("thumb_mime","image/jpeg"))).execute()
-        send_tg(chat_id, "✅ YouTube par upload ho gaya!\n\n"
-            f"Title: {metadata['title']}\nTags: {', '.join(metadata['tags'][:12])}\n"
-            f"Hashtags: {' '.join(metadata['hashtags'])}\n"
-            f"Video: https://youtu.be/{video_id}")
+        final_message = "✅ YouTube par upload ho gaya!\n\n" + f"Title: {metadata['title']}\nTags: {', '.join(metadata['tags'][:12])}\n" + f"Hashtags: {' '.join(metadata['hashtags'])}\nVideo: https://youtu.be/{video_id}"
+        if progress_msg:
+            tg("editMessageText", {"chat_id": chat_id,
+                "message_id": progress_msg["message_id"], "text": final_message})
+        else:
+            send_tg(chat_id, final_message)
     except Exception as exc:
         log.exception("Telegram media publish failed")
         send_tg(chat_id, "❌ Upload nahi hua: " + str(exc)[:700])
