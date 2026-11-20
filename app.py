@@ -1236,4 +1236,9 @@ def set_webhook():
     if not env("MANAGER_API_TOKEN") or not hmac.compare_digest(request.headers.get("X-Manager-Token",""),env("MANAGER_API_TOKEN")):
         return jsonify(error="unauthorized"),401
     base=env("RENDER_EXTERNAL_URL").rstrip("/")
-    result=tg("setWebhook",{"url":base+"/telegram/webhook","secret_token":env("TELEGRAM_WEBHOOK_SECRET"),
+    result=tg("setWebhook", {
+        "url": base + "/telegram/webhook",
+        "secret_token": env("TELEGRAM_WEBHOOK_SECRET"),
+        "allowed_updates": ["message", "callback_query"]
+    })
+    return jsonify(ok=True, result=result)
