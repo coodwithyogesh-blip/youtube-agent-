@@ -1,0 +1,7 @@
+git
+cmake
+g++
+gperf
+make
+zlib1g-dev
+libssl-dev
