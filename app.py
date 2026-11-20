@@ -112,12 +112,23 @@ def tg(method, payload):
     token = env("TELEGRAM_BOT_TOKEN")
     if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN missing")
-    r = requests.post(f"{TELEGRAM_API}{token}/{method}", json=payload, timeout=600)
-    r.raise_for_status()
-    data = r.json()
-    if not data.get("ok"):
-        raise RuntimeError(data.get("description", "Telegram API error"))
-    return data.get("result")
+    url = f"{TELEGRAM_API}{token}/{method}"
+    # Retry temporary connection/read timeouts for file metadata and other API calls.
+    last_error = None
+    for attempt in range(3):
+        try:
+            r = requests.post(url, json=payload, timeout=600)
+            r.raise_for_status()
+            data = r.json()
+            if not data.get("ok"):
+                raise RuntimeError(data.get("description", "Telegram API error"))
+            return data.get("result")
+        except (requests.Timeout, requests.ConnectionError) as exc:
+            last_error = exc
+            if attempt == 2:
+                raise
+            time.sleep(2 * (attempt + 1))
+    raise last_error
 
 def send_tg(chat_id, message):
     tg("sendMessage", {"chat_id":chat_id,"text":message,"disable_web_page_preview":True})
@@ -757,7 +768,11 @@ def process_update(update):
         message = query.get("message") or {}
         chat = message.get("chat") or {}
         chat_id = chat.get("id")
-        tg("answerCallbackQuery", {"callback_query_id": query.get("id", "")})
+        # Expired/duplicate callback queries are harmless; don't fail the whole update.
+        try:
+            tg("answerCallbackQuery", {"callback_query_id": query.get("id", "")})
+        except Exception:
+            log.warning("Callback query could not be answered (possibly expired)", exc_info=True)
         if chat_id and chat.get("type") == "private":
             if data == "menu":
                 tg("editMessageText", {"chat_id": chat_id,
