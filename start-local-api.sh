@@ -7,6 +7,11 @@ telegram-bot-api --local --api-id="$TELEGRAM_API_ID" --api-hash="$TELEGRAM_API_H
 API_PID=$!
 export TELEGRAM_API_BASE="http://127.0.0.1:8081/bot"
 export TELEGRAM_FILE_BASE="http://127.0.0.1:8081/file/bot"
+cleanup() {
+  if [ -n "${APP_PID:-}" ]; then kill "$APP_PID" 2>/dev/null || true; fi
+  kill "$API_PID" 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
 python - <<'PY'
 import socket,time,sys
 for _ in range(60):
@@ -15,5 +20,6 @@ for _ in range(60):
     except OSError: time.sleep(1)
 sys.exit("Telegram Local API server did not start")
 PY
-trap 'kill "$API_PID" 2>/dev/null || true' EXIT INT TERM
-exec gunicorn app:app --workers 1 --threads 8 --timeout 240
+gunicorn app:app --workers 1 --threads 8 --timeout 240 &
+APP_PID=$!
+wait "$APP_PID"
