@@ -1019,9 +1019,9 @@ def process_update(update):
             log.exception("Google Sheets user registration failed")
         welcome = main_menu_text(user.get("first_name", ""))
         if registration_ok:
-            welcome += "\\n\\n✅ Telegram account Google Sheets mein registered."
+            welcome += "\n\n✅ Telegram account Google Sheets mein registered."
         else:
-            welcome += "\\n\\n⚠️ Menu available; registration storage temporarily unavailable."
+            welcome += "\n\n⚠️ Menu available; registration storage temporarily unavailable."
         tg("sendMessage", {"chat_id": chat_id, "text": welcome,
             "reply_markup": main_menu_keyboard()})
         return
