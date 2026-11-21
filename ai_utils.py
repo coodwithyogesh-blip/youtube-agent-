@@ -50,7 +50,7 @@ def generate_content_with_fallback(api_key, model, payload, timeout=60,
                 pass
     for model_index, model_name in enumerate(models):
         for attempt in range(attempts):
-            report(f\"⏳ Gemini metadata request: {model_name} (attempt {attempt + 1}/{attempts})…\")
+            report(f"⏳ Gemini metadata request: {model_name} (attempt {attempt + 1}/{attempts})…")
             url = ("https://generativelanguage.googleapis.com/v1beta/models/"
                    f"{model_name}:generateContent")
             try:
@@ -65,7 +65,7 @@ def generate_content_with_fallback(api_key, model, payload, timeout=60,
                             "Check API key permissions, quota, and request settings."
                         )
                     if attempt + 1 < attempts and status in RETRYABLE_STATUS_CODES:
-                        report(f\"⏳ Gemini response HTTP {status}; retry kar raha hoon…\")
+                        report(f"⏳ Gemini response HTTP {status}; retry kar raha hoon…")
                         time.sleep(_retry_delay(response, attempt))
                         continue
                     break
@@ -83,7 +83,7 @@ def generate_content_with_fallback(api_key, model, payload, timeout=60,
                 else:
                     last_network_error = type(exc).__name__
                 if attempt + 1 < attempts and (status is None or status in RETRYABLE_STATUS_CODES):
-                    report(f\"⏳ Gemini connection retry {attempt + 2}/{attempts}…\")
+                    report(f"⏳ Gemini connection retry {attempt + 2}/{attempts}…")
                     time.sleep(_retry_delay(response, attempt))
                     continue
                 break
