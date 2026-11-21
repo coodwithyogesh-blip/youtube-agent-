@@ -32,8 +32,7 @@ PY
 gunicorn app:app --workers 1 --threads 8 --timeout 240 &
 APP_PID=$!
 
-# Automatically configure Telegram webhook and keep it configured.
-# Wait for app readiness; then repair it if it becomes unset.
+# Automatically configure Telegram webhook and check/repair it hourly.
 if [ -n "${RENDER_EXTERNAL_URL:-}" ] && [ -n "${MANAGER_API_TOKEN:-}" ]; then
   python - <<'PY'
 import os, time, urllib.request, json
@@ -67,7 +66,7 @@ else:
                 print("Webhook check: configured", flush=True)
         except Exception as exc:
             print("Webhook auto-check/recovery error:", type(exc).__name__, flush=True)
-        time.sleep(300)
+        time.sleep(3600)
 PY
 else
   echo "Webhook auto-setup skipped: RENDER_EXTERNAL_URL or MANAGER_API_TOKEN missing."
