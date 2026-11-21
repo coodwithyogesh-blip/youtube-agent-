@@ -271,12 +271,29 @@ def upload_telegram_pair(chat_id):
         update_video_status("✍️ Title, description aur tags taiyar hain. YouTube upload shuru ho raha hai…")
         body = build_video_metadata(metadata["title"], metadata["description"],
                                     json.dumps(metadata["tags"]), "public", None)
-        media = MediaFileUpload(item["video"], chunksize=8*1024*1024,
+        # Keep resumable upload memory usage low and report progress rather than
+        # blocking silently inside a single .execute() call.
+        media = MediaFileUpload(item["video"], chunksize=1024*1024,
                                 resumable=True, mimetype=item.get("mime","video/mp4"))
         service = youtube_service_for_user(item["user_id"], item["selected_channel_id"])
-        update_video_status("📤 YouTube par video upload ho raha hai…")
-        result = service.videos().insert(part="snippet,status", body=body, media_body=media).execute()
-        video_id = result["id"]
+        update_video_status("📤 YouTube upload shuru… 0%")
+        upload_request = service.videos().insert(part="snippet,status", body=body, media_body=media)
+        video_size = os.path.getsize(item["video"])
+        last_progress_at = 0
+        video_id = None
+        while video_id is None:
+            status, response = upload_request.next_chunk(num_retries=3)
+            if response is not None:
+                video_id = response.get("id")
+            elif status is not None:
+                percent = int(status.progress() * 100)
+                now = time.time()
+                if percent >= 100 or now - last_progress_at >= 10:
+                    update_video_status("📤 YouTube par video upload ho raha hai… {}% ({:.1f}/{:.1f} MB)".format(
+                        percent, video_size * status.progress()/1024/1024, video_size/1024/1024))
+                    last_progress_at = now
+        if not video_id:
+            raise RuntimeError("YouTube upload response mein video ID nahi mila")
         if os.path.getsize(item["thumbnail"]) > 2*1024*1024:
             raise RuntimeError("Video upload ho gaya, lekin thumbnail 2 MB se bada hai. YouTube limit ke andar thumbnail bhejo.")
         update_video_status("🖼️ YouTube thumbnail set kar raha hoon…")
