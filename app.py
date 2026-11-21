@@ -34,6 +34,7 @@ SEO_FIX_PENDING = {}
 SOCIAL_DRAFTS = {}
 SOCIAL_MEDIA = {}  # temporary video files; never persisted
 AUTO_THREAD_STARTED = False
+UPLOAD_LOCK_FILE = os.getenv("UPLOAD_LOCK_FILE", "/tmp/youtube-agent-upload.lock")
 def env(name, default=""):
     return os.getenv(name, default).strip()
 
@@ -254,6 +255,8 @@ def upload_telegram_pair(chat_id):
     item["busy"] = True
     progress_msg = None
     try:
+        with open(UPLOAD_LOCK_FILE, "w") as lock_file:
+            lock_file.write(str(chat_id))
         progress_msg = send_tg(chat_id, "📤 Gemini par video bhej raha hoon…")
         def update_video_status(stage):
             if not progress_msg:
@@ -310,6 +313,10 @@ def upload_telegram_pair(chat_id):
         log.exception("Telegram media publish failed")
         send_tg(chat_id, "❌ Upload nahi hua: " + str(exc)[:700])
     finally:
+        try:
+            os.remove(UPLOAD_LOCK_FILE)
+        except OSError:
+            pass
         remove_media(chat_id)
 
 def receive_media(message, chat_id, user_id):
