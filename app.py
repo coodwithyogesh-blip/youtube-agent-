@@ -254,11 +254,14 @@ def upload_telegram_pair(chat_id):
         return
     item["busy"] = True
     progress_msg = None
+    video_id = None
     try:
         with open(UPLOAD_LOCK_FILE, "w") as lock_file:
             lock_file.write(str(chat_id))
+        log.info("Upload job started chat_id=%s", chat_id)
         progress_msg = send_tg(chat_id, "📤 Gemini par video bhej raha hoon…")
         def update_video_status(stage):
+            log.info("Upload stage chat_id=%s stage=%s", chat_id, stage[:160])
             if not progress_msg:
                 send_tg(chat_id, stage)
                 return
@@ -266,7 +269,7 @@ def upload_telegram_pair(chat_id):
                 tg("editMessageText", {"chat_id": chat_id,
                     "message_id": progress_msg["message_id"], "text": stage})
             except Exception:
-                log.warning("Video processing status update failed")
+                log.warning("Video processing status update failed chat_id=%s", chat_id)
         metadata = generate_video_metadata(env("GEMINI_API_KEY"),
             env("GEMINI_MODEL","gemini-3.8-flash"), item["video"], item.get("filename","video.mp4"),
             item.get("caption",""), thumbnail_path=item["thumbnail"],
@@ -274,8 +277,6 @@ def upload_telegram_pair(chat_id):
         update_video_status("✍️ Title, description aur tags taiyar hain. YouTube upload shuru ho raha hai…")
         body = build_video_metadata(metadata["title"], metadata["description"],
                                     json.dumps(metadata["tags"]), "public", None)
-        # Keep resumable upload memory usage low and report progress rather than
-        # blocking silently inside a single .execute() call.
         media = MediaFileUpload(item["video"], chunksize=1024*1024,
                                 resumable=True, mimetype=item.get("mime","video/mp4"))
         service = youtube_service_for_user(item["user_id"], item["selected_channel_id"])
@@ -283,11 +284,11 @@ def upload_telegram_pair(chat_id):
         upload_request = service.videos().insert(part="snippet,status", body=body, media_body=media)
         video_size = os.path.getsize(item["video"])
         last_progress_at = 0
-        video_id = None
         while video_id is None:
             status, response = upload_request.next_chunk(num_retries=3)
             if response is not None:
                 video_id = response.get("id")
+                log.info("YouTube video upload completed chat_id=%s video_id=%s", chat_id, video_id)
             elif status is not None:
                 percent = int(status.progress() * 100)
                 now = time.time()
@@ -303,21 +304,34 @@ def upload_telegram_pair(chat_id):
         service.thumbnails().set(videoId=video_id,
             media_body=MediaFileUpload(item["thumbnail"], resumable=False,
                                        mimetype=item.get("thumb_mime","image/jpeg"))).execute()
-        final_message = "✅ YouTube par upload ho gaya!\n\n" + f"Title: {metadata['title']}\nTags: {', '.join(metadata['tags'][:12])}\n" + f"Hashtags: {' '.join(metadata['hashtags'])}\nVideo: https://youtu.be/{video_id}"
+        log.info("Thumbnail set and publish workflow complete chat_id=%s video_id=%s", chat_id, video_id)
+        final_message = "✅ YouTube par upload ho gaya!\\n\\n" + f"Title: {metadata['title']}\\nTags: {', '.join(metadata['tags'][:12])}\\n" + f"Hashtags: {' '.join(metadata['hashtags'])}\\nVideo: https://youtu.be/{video_id}"
         if progress_msg:
             tg("editMessageText", {"chat_id": chat_id,
                 "message_id": progress_msg["message_id"], "text": final_message})
         else:
             send_tg(chat_id, final_message)
     except Exception as exc:
-        log.exception("Telegram media publish failed")
-        send_tg(chat_id, "❌ Upload nahi hua: " + str(exc)[:700])
+        log.exception("Telegram media publish failed chat_id=%s video_id=%s", chat_id, video_id)
+        if video_id:
+            error_message = "⚠️ Video YouTube par upload ho chuka hai, lekin thumbnail/final step fail hua.\\nVideo: https://youtu.be/" + video_id + "\\nError: " + str(exc)[:500]
+        else:
+            error_message = "❌ Upload nahi hua: " + str(exc)[:700]
+        try:
+            if progress_msg:
+                tg("editMessageText", {"chat_id": chat_id,
+                    "message_id": progress_msg["message_id"], "text": error_message})
+            else:
+                send_tg(chat_id, error_message)
+        except Exception:
+            log.exception("Final Telegram failure message could not be delivered chat_id=%s", chat_id)
     finally:
         try:
             os.remove(UPLOAD_LOCK_FILE)
         except OSError:
             pass
         remove_media(chat_id)
+        log.info("Upload job cleanup complete chat_id=%s", chat_id)
 
 def receive_media(message, chat_id, user_id):
     key = str(chat_id)
