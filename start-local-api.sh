@@ -32,23 +32,42 @@ PY
 gunicorn app:app --workers 1 --threads 8 --timeout 240 &
 APP_PID=$!
 
-# Automatically configure Telegram webhook from Render environment after app readiness.
+# Automatically configure Telegram webhook and keep it configured.
+# Wait for app readiness; then repair it if it becomes unset.
 if [ -n "${RENDER_EXTERNAL_URL:-}" ] && [ -n "${MANAGER_API_TOKEN:-}" ]; then
   python - <<'PY'
-import os, time, urllib.request
+import os, time, urllib.request, json
 base=os.environ.get("RENDER_EXTERNAL_URL","").rstrip("/")
 token=os.environ.get("MANAGER_API_TOKEN","")
-if base and token:
-    for _ in range(60):
+headers={"X-Manager-Token":token}
+def request(path, method="GET"):
+    req=urllib.request.Request(base+path, method=method, headers=headers)
+    with urllib.request.urlopen(req, timeout=15) as response:
+        return json.loads(response.read().decode())
+ready=False
+for _ in range(90):
+    try:
+        with urllib.request.urlopen(base+"/healthz", timeout=8) as response:
+            if response.status == 200:
+                ready=True
+                break
+    except Exception:
+        pass
+    time.sleep(2)
+if not ready:
+    print("Webhook auto-setup: readiness timed out", flush=True)
+else:
+    while True:
         try:
-            req=urllib.request.Request(base+"/admin/set-webhook", method="POST",
-                headers={"X-Manager-Token":token})
-            with urllib.request.urlopen(req, timeout=8) as response:
-                print("Telegram webhook auto-setup:", response.read().decode()[:300])
-            break
+            status=request("/admin/webhook-status")
+            if not status.get("webhook",{}).get("url_configured"):
+                print("Webhook missing; repairing...", flush=True)
+                print("Webhook auto-repair result:", request("/admin/set-webhook", "POST"), flush=True)
+            else:
+                print("Webhook check: configured", flush=True)
         except Exception as exc:
-            print("Webhook auto-setup waiting:", type(exc).__name__)
-            time.sleep(2)
+            print("Webhook auto-check/recovery error:", type(exc).__name__, flush=True)
+        time.sleep(300)
 PY
 else
   echo "Webhook auto-setup skipped: RENDER_EXTERNAL_URL or MANAGER_API_TOKEN missing."
