@@ -78,6 +78,12 @@ def generate_content_with_fallback(api_key, model, payload, timeout=60,
                             f"Gemini API request failed with HTTP {status}. "
                             "Check API key permissions, quota, and request settings."
                         )
+                    # HTTP 503 usually means the model/service is overloaded.
+                    # Skip repeated waits on the primary and move immediately to fallback.
+                    if status == 503:
+                        if model_index + 1 < len(models):
+                            report("⚠️ Gemini HTTP 503; turant fallback model par switch kar raha hoon…")
+                        break
                     if attempt + 1 < attempts and status in RETRYABLE_STATUS_CODES:
                         report(f"⏳ Gemini response HTTP {status}; retry kar raha hoon…")
                         time.sleep(min(_retry_delay(response, attempt), max(0, deadline - time.monotonic())))
