@@ -67,15 +67,7 @@ else
   echo "Webhook auto-setup skipped: RENDER_EXTERNAL_URL or MANAGER_API_TOKEN missing."
 fi
 
-# Restart Gunicorn hourly, but never during the guarded Telegram video-upload flow.
-while true; do
-  sleep 3600
-  echo "Hourly app restart requested; waiting for video upload lock to clear."
-  while [ -e "$UPLOAD_LOCK_FILE" ]; do sleep 20; done
-  if kill -0 "$APP_PID" 2>/dev/null; then
-    kill "$APP_PID" 2>/dev/null || true
-    wait "$APP_PID" 2>/dev/null || true
-  fi
-  start_app
-  echo "Gunicorn restarted after upload-safe hourly check."
-done
+# No periodic Gunicorn restarts: keep long-running upload threads alive.
+# Render may still restart instances for platform events/deploys.
+echo "Gunicorn periodic restart disabled."
+wait "$APP_PID"
