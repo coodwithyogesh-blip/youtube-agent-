@@ -176,7 +176,7 @@ def telegram_download(file_id, suffix, chat_id=None):
     progress_msg = None
     if chat_id is not None:
         progress_msg = tg("sendMessage", {"chat_id": chat_id,
-            "text": "⬇️ Download shuru... 0%\\n📦 Size: " + (("{:.1f} MB".format(size/1024/1024)) if size else "unknown")})
+            "text": "⬇️ Download shuru... 0%\n📦 Size: " + (("{:.1f} MB".format(size/1024/1024)) if size else "unknown")})
 
     downloaded = 0
     last_update = 0
@@ -201,7 +201,7 @@ def telegram_download(file_id, suffix, chat_id=None):
                                 try:
                                     tg("editMessageText", {"chat_id": chat_id,
                                         "message_id": progress_msg["message_id"],
-                                        "text": "⬇️ Download ho raha hai... {}%\\n📦 {:.1f} / {:.1f} MB".format(percent, downloaded/1024/1024, size/1024/1024)})
+                                        "text": "⬇️ Download ho raha hai... {}%\n📦 {:.1f} / {:.1f} MB".format(percent, downloaded/1024/1024, size/1024/1024)})
                                     last_percent, last_update = percent, time.time()
                                 except Exception:
                                     pass
@@ -220,7 +220,7 @@ def telegram_download(file_id, suffix, chat_id=None):
                                 try:
                                     tg("editMessageText", {"chat_id": chat_id,
                                         "message_id": progress_msg["message_id"],
-                                        "text": "⬇️ Download ho raha hai... {}%\\n📦 {:.1f} / {:.1f} MB".format(percent, downloaded/1024/1024, size/1024/1024)})
+                                        "text": "⬇️ Download ho raha hai... {}%\n📦 {:.1f} / {:.1f} MB".format(percent, downloaded/1024/1024, size/1024/1024)})
                                     last_percent, last_update = percent, time.time()
                                 except Exception:
                                     pass
@@ -305,7 +305,7 @@ def upload_telegram_pair(chat_id):
             media_body=MediaFileUpload(item["thumbnail"], resumable=False,
                                        mimetype=item.get("thumb_mime","image/jpeg"))).execute()
         log.info("Thumbnail set and publish workflow complete chat_id=%s video_id=%s", chat_id, video_id)
-        final_message = "✅ YouTube par upload ho gaya!\\n\\n" + f"Title: {metadata['title']}\\nTags: {', '.join(metadata['tags'][:12])}\\n" + f"Hashtags: {' '.join(metadata['hashtags'])}\\nVideo: https://youtu.be/{video_id}"
+        final_message = "✅ YouTube par upload ho gaya!\n\n" + f"Title: {metadata['title']}\nTags: {', '.join(metadata['tags'][:12])}\n" + f"Hashtags: {' '.join(metadata['hashtags'])}\nVideo: https://youtu.be/{video_id}"
         if progress_msg:
             tg("editMessageText", {"chat_id": chat_id,
                 "message_id": progress_msg["message_id"], "text": final_message})
@@ -314,7 +314,7 @@ def upload_telegram_pair(chat_id):
     except Exception as exc:
         log.exception("Telegram media publish failed chat_id=%s video_id=%s", chat_id, video_id)
         if video_id:
-            error_message = "⚠️ Video YouTube par upload ho chuka hai, lekin thumbnail/final step fail hua.\\nVideo: https://youtu.be/" + video_id + "\\nError: " + str(exc)[:500]
+            error_message = "⚠️ Video YouTube par upload ho chuka hai, lekin thumbnail/final step fail hua.\nVideo: https://youtu.be/" + video_id + "\nError: " + str(exc)[:500]
         else:
             error_message = "❌ Upload nahi hua: " + str(exc)[:700]
         try:
