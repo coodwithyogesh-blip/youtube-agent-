@@ -4,6 +4,7 @@ import mimetypes
 import os
 import re
 import time
+import threading
 import requests
 
 RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
@@ -57,6 +58,15 @@ def generate_content_with_fallback(api_key, model, payload, timeout=60,
             report(f"⏳ Gemini metadata request: {model_name} (attempt {attempt + 1}/{attempts})…")
             url = ("https://generativelanguage.googleapis.com/v1beta/models/"
                    f"{model_name}:generateContent")
+            # Gemini request heartbeat: keep Telegram status alive during blocking HTTP calls.
+            heartbeat_stop = threading.Event()
+            heartbeat_thread = None
+            if progress_callback:
+                def heartbeat():
+                    while not heartbeat_stop.wait(25):
+                        report("⏳ Gemini response wait heartbeat: abhi response ka wait ho raha hai…")
+                heartbeat_thread = threading.Thread(target=heartbeat, daemon=True)
+                heartbeat_thread.start()
             try:
                 response = requests.post(url, params={"key": api_key},
                                          json=payload, timeout=min(timeout, max(1, remaining)))
@@ -91,6 +101,8 @@ def generate_content_with_fallback(api_key, model, payload, timeout=60,
                     time.sleep(min(_retry_delay(response, attempt), max(0, deadline - time.monotonic())))
                     continue
                 break
+            finally:
+                heartbeat_stop.set()
         # Try the fallback only after transient failure or model-not-found.
         if model_index + 1 < len(models):
             continue
