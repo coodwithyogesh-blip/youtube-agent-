@@ -1164,6 +1164,7 @@ def process_update(update):
 @app.get("/")
 def home():
     return Response("""<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="google-site-verification" content="Xx2ZZLos3gtW-ZE8MjAnnNGPxPa-g0Mbw8iRKaivOws" />
 <title>YouTube Agent</title><style>body{font:16px system-ui;max-width:760px;margin:24px auto;padding:0 16px;background:#101827;color:#f4f7fb}
 section{background:#1b2940;padding:18px;border-radius:14px;margin:14px 0}input,textarea,select,button{box-sizing:border-box;width:100%;padding:12px;margin:7px 0;border-radius:8px;border:1px solid #52627b;background:#0e1726;color:white}button{background:#2874f0;border:0;font-weight:700}</style></head><body>
 <h2>🎬 YouTube Agent</h2><p>Telegram par video aur apna thumbnail bhejo. AI metadata generate karega; thumbnail AI nahi banayega.</p>
