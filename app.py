@@ -1165,9 +1165,9 @@ def process_update(update):
 def home():
     return Response("""<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="google-site-verification" content="Xx2ZZLos3gtW-ZE8MjAnnNGPxPa-g0Mbw8iRKaivOws" />
-<title>YouTube Agent</title><style>body{font:16px system-ui;max-width:760px;margin:24px auto;padding:0 16px;background:#101827;color:#f4f7fb}
-section{background:#1b2940;padding:18px;border-radius:14px;margin:14px 0}input,textarea,select,button{box-sizing:border-box;width:100%;padding:12px;margin:7px 0;border-radius:8px;border:1px solid #52627b;background:#0e1726;color:white}button{background:#2874f0;border:0;font-weight:700}</style></head><body>
-<h2>🎬 YouTube Agent</h2><p>Telegram par video aur apna thumbnail bhejo. AI metadata generate karega; thumbnail AI nahi banayega.</p>
+<title>Tiwari YouTube AI Manager</title><style>body{font:16px system-ui;max-width:760px;margin:24px auto;padding:0 16px;background:#101827;color:#f4f7fb}
+section{background:#1b2940;padding:18px;border-radius:14px;margin:14px 0}input,textarea,select,button{box-sizing:border-box;width:100%;padding:12px;margin:7px 0;border-radius:8px;border:1px solid #52627b;background:#0e1726;color:white}button{background:#2874f0;border:0;font-weight:700}a{color:#8ab4ff}</style></head><body>
+<h1>🎬 Tiwari YouTube AI Manager</h1><p>A tool for managing YouTube uploads, video metadata, thumbnails and channel workflows through Telegram and this upload interface.</p><p><a href="https://coodwithyogesh-blip.github.io/youtube-agent-privacy/">Privacy Policy</a> · <a href="https://coodwithyogesh-blip.github.io/youtube-agent-privacy/terms.html">Terms of Service</a> · Contact: coodwithyogesh@gmail.com</p><p>Public information page. Upload tool below requires your Manager API token.</p>
 <section><label>Manager API token<input id="token" type="password"></label><form id="upload">
 <label>Video<input name="video" type="file" accept="video/*" required></label><label>Your thumbnail<input name="thumbnail" type="file" accept="image/jpeg,image/png,image/gif,image/bmp" required></label>
 <button type="submit">AI generate metadata and upload</button></form><pre id="result">Ready</pre></section>
